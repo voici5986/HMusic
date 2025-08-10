@@ -36,6 +36,7 @@ dependencies:
   # HTTP客户端
   dio: ^5.4.0
   file_picker: ^8.0.3
+  dartssh2: ^2.8.2
   # 图片缓存
   cached_network_image: ^3.3.0
   # 本地存储

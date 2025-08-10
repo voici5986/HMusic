@@ -138,11 +138,17 @@ class MusicApiService {
   Future<Map<String, dynamic>> downloadMusicByUrl({
     required String url,
     Map<String, dynamic>? extraFields,
-    String endpoint = '/download',
+    String endpoint = '/downloadjson',
   }) async {
     final body = {'url': url, ...?extraFields};
     final resp = await _client.post(endpoint, data: body);
     return (resp.data as Map).cast<String, dynamic>();
+  }
+
+  // Download raw log/file text from /downloadlog
+  Future<String> getDownloadLog() async {
+    final resp = await _client.getPlain('/downloadlog');
+    return resp.data ?? '';
   }
 
   // 播放列表相关方法
@@ -288,5 +294,13 @@ class MusicApiService {
 
     final resp = await _client.post(endpoint, data: formData);
     return (resp.data as Map).cast<String, dynamic>();
+  }
+
+  // 上传 ytdlp Cookie 文件供后端下载器使用
+  Future<Map<String, dynamic>> uploadYtDlpCookie(String filePath) async {
+    return uploadFiles(
+      endpoint: '/uploadytdlpcookie',
+      files: [UploadFile(fieldName: 'file', filePath: filePath)],
+    );
   }
 }

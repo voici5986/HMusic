@@ -190,6 +190,27 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
     }
   }
 
+  // 直接通过 SSH/SCP 上传（无服务端HTTP上传时的替代方案）
+  Future<void> uploadViaScp({
+    required String host,
+    required int port,
+    required String username,
+    required String password,
+    required String remoteDir,
+    required List<PlatformFile> files,
+  }) async {
+    try {
+      state = state.copyWith(isLoading: true);
+      // 延迟加载依赖，避免导入开销影响无此功能路径
+      // 预留：按需引入 dartssh2 并实现 SCP 复制逻辑
+      // 为了避免在不使用时引入 dartssh2 的强依赖，这里只声明接口
+      // 实际实现可在后续 commit 中补充（或在平台层运行脚本）。
+      throw UnimplementedError('SCP 上传实现留空：需要 dartssh2 Session 进行复制');
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: e.toString());
+    }
+  }
+
   void clearError() {
     state = state.copyWith(error: null);
   }
