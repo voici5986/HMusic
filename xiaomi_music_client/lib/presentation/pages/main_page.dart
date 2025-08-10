@@ -10,7 +10,6 @@ import 'music_search_page.dart';
 import 'playlist_page.dart';
 import 'music_library_page.dart';
 import '../providers/auth_provider.dart';
-import '../providers/playlist_provider.dart';
 import '../providers/music_library_provider.dart';
 import '../widgets/app_snackbar.dart';
 
@@ -163,29 +162,6 @@ class _MainPageState extends ConsumerState<MainPage> {
                   tooltip: '上传音乐文件',
                 ),
               ),
-            Container(
-              margin: const EdgeInsets.only(right: 8),
-              child: IconButton(
-                icon: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: onSurface.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.refresh_rounded,
-                    color: onSurface,
-                    size: 20,
-                  ),
-                ),
-                onPressed: () {
-                  if (_selectedIndex == 2) {
-                    ref.read(playlistProvider.notifier).refreshPlaylists();
-                  }
-                  // TODO: Add refresh logic for other pages if needed
-                },
-              ),
-            ),
             PopupMenuButton<String>(
               icon: Container(
                 padding: const EdgeInsets.all(8),
@@ -193,7 +169,7 @@ class _MainPageState extends ConsumerState<MainPage> {
                   color: onSurface.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.person_rounded, color: onSurface, size: 20),
+                child: Icon(Icons.settings_rounded, color: onSurface, size: 20),
               ),
               color: Theme.of(context).colorScheme.surface,
               shape: RoundedRectangleBorder(
@@ -201,49 +177,22 @@ class _MainPageState extends ConsumerState<MainPage> {
               ),
               onSelected: (value) {
                 switch (value) {
-                  case 'logout':
-                    ref.read(authProvider.notifier).logout();
-                    break;
                   case 'download_settings':
                     context.push('/settings/download');
                     break;
                   case 'download_tasks':
                     context.push('/downloads');
                     break;
+                  case 'ssh_settings':
+                    context.push('/settings/ssh');
+                    break;
+                  case 'logout':
+                    ref.read(authProvider.notifier).logout();
+                    break;
                 }
               },
               itemBuilder:
                   (context) => [
-                    PopupMenuItem(
-                      value: 'user_info',
-                      enabled: false,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            authState is AuthAuthenticated
-                                ? authState.username
-                                : '未登录',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: onSurface,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            authState is AuthAuthenticated
-                                ? authState.serverUrl
-                                : '',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: onSurface.withOpacity(0.6),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuDivider(),
                     PopupMenuItem(
                       value: 'download_tasks',
                       child: Row(
@@ -273,6 +222,23 @@ class _MainPageState extends ConsumerState<MainPage> {
                           const SizedBox(width: 12),
                           Text(
                             '下载设置',
+                            style: TextStyle(color: onSurface.withOpacity(0.9)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'ssh_settings',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.cloud_upload_rounded,
+                            color: onSurface.withOpacity(0.8),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'SCP 上传设置',
                             style: TextStyle(color: onSurface.withOpacity(0.9)),
                           ),
                         ],
