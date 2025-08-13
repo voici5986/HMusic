@@ -28,8 +28,6 @@ class _TtsSettingsPageState extends ConsumerState<TtsSettingsPage> {
     super.dispose();
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -148,14 +146,11 @@ class _TtsSettingsPageState extends ConsumerState<TtsSettingsPage> {
                 ],
               ),
             ),
-
           ],
         ),
       ),
     );
   }
-
-
 
   // 🎯 TTS测试功能
   Future<void> _testTts() async {
@@ -239,6 +234,29 @@ class _TtsSettingsPageState extends ConsumerState<TtsSettingsPage> {
               backgroundColor: Colors.green,
             ),
           );
+        }
+
+        // 🎯 等待TTS播放完成后，自动恢复音乐播放
+        print('🎵 TTS播放完成，等待恢复音乐播放...');
+        await Future.delayed(const Duration(seconds: 3)); // 等待TTS播放完成
+        
+        try {
+          // 尝试恢复音乐播放
+          await apiService.resumeMusic(did: selectedDeviceId);
+          print('🎵 音乐播放已恢复');
+          
+          if (mounted) {
+            AppSnackBar.show(
+              context,
+              const SnackBar(
+                content: Text('TTS播放完成，音乐已恢复播放'),
+                backgroundColor: Colors.blue,
+              ),
+            );
+          }
+        } catch (e) {
+          print('🎵 恢复音乐播放失败: $e');
+          // 恢复失败不影响TTS功能，只记录日志
         }
       } else {
         throw Exception('API服务不可用');
