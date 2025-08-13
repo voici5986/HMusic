@@ -441,7 +441,9 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
       // 🎯 新增：如果没有选择设备，提示用户选择
       if (deviceState.selectedDeviceId == null) {
         if (mounted) {
-          final shouldSelectDevice = await _showDeviceSelectionDialog(deviceState.devices);
+          final shouldSelectDevice = await _showDeviceSelectionDialog(
+            deviceState.devices,
+          );
           if (!shouldSelectDevice) return; // 用户取消选择
         }
       }
@@ -465,13 +467,10 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
       final apiService = ref.read(apiServiceProvider);
       if (apiService != null) {
         try {
-          await apiService.playUrl(
-            did: selectedDeviceId,
-            url: playUrl,
-          );
-          
+          await apiService.playUrl(did: selectedDeviceId, url: playUrl);
+
           print('✅ [Play] 直接播放请求成功');
-          
+
           if (mounted) {
             AppSnackBar.show(
               context,
@@ -481,7 +480,7 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
               ),
             );
           }
-          
+
           // 🎯 新增：播放成功后，可以选择是否下载到音乐库
           if (mounted) {
             final shouldDownload = await _showDownloadConfirmation(item.title);
@@ -489,7 +488,7 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
               await ref
                   .read(musicLibraryProvider.notifier)
                   .downloadOneMusic(item.title, url: playUrl);
-              
+
               if (mounted) {
                 AppSnackBar.show(
                   context,
@@ -501,7 +500,7 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
               }
             }
           }
-          
+
           return; // 直接播放成功，不需要再走下载逻辑
         } catch (e) {
           print('❌ [Play] 直接播放失败: $e');
@@ -544,125 +543,133 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
   // 🎯 新增：显示设备选择对话框
   Future<bool> _showDeviceSelectionDialog(List<Device> devices) async {
     if (devices.isEmpty) return false;
-    
+
     final selectedDeviceId = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text(
-          '选择播放设备',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: devices.map((device) {
-            final isOnline = device.isOnline ?? false;
-            return ListTile(
-              leading: Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: isOnline ? Colors.green : Colors.grey,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              title: Text(
-                device.name,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              subtitle: Text(
-                isOnline ? '在线' : '离线',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                ),
-              ),
-              onTap: () => Navigator.of(context).pop(device.id),
-            );
-          }).toList(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(
-              '取消',
+      builder:
+          (context) => AlertDialog(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Text(
+              '选择播放设备',
               style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children:
+                  devices.map((device) {
+                    final isOnline = device.isOnline ?? false;
+                    return ListTile(
+                      leading: Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: isOnline ? Colors.green : Colors.grey,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      title: Text(
+                        device.name,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      subtitle: Text(
+                        isOnline ? '在线' : '离线',
+                        style: TextStyle(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.6),
+                        ),
+                      ),
+                      onTap: () => Navigator.of(context).pop(device.id),
+                    );
+                  }).toList(),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(
+                  '取消',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
     );
-    
+
     if (selectedDeviceId != null) {
       ref.read(deviceProvider.notifier).selectDevice(selectedDeviceId);
       return true;
     }
-    
+
     return false;
   }
 
   // 🎯 新增：显示下载确认对话框
   Future<bool> _showDownloadConfirmation(String musicTitle) async {
     return await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Theme.of(context).colorScheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Text(
-          '添加到音乐库',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Text(
-          '是否将 "$musicTitle" 添加到音乐库？',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(
-              '取消',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+          context: context,
+          builder:
+              (context) => AlertDialog(
+                backgroundColor: Theme.of(context).colorScheme.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                title: Text(
+                  '添加到音乐库',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                content: Text(
+                  '是否将 "$musicTitle" 添加到音乐库？',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    child: Text(
+                      '取消',
+                      style: TextStyle(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.onSurface.withOpacity(0.6),
+                      ),
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: Text(
+                      '添加',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onPrimary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text(
-              '添加',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onPrimary,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    ) ?? false;
+        ) ??
+        false;
   }
 }
