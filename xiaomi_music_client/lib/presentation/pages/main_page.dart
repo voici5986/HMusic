@@ -121,7 +121,7 @@ class _MainPageState extends ConsumerState<MainPage> {
         child: Row(
           children: [
             Text(
-              '小爱音乐',
+              '小爱音乐盒',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,

@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter_js/flutter_js.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/services.dart';
 import '../../presentation/providers/source_settings_provider.dart';
 import 'dart:convert';
+import 'grass_source_decoder.dart';
 
 class LocalJsSourceService {
   final JavascriptRuntime _rt;
@@ -14,9 +16,13 @@ class LocalJsSourceService {
   static Future<LocalJsSourceService> create() async {
     final dio = Dio(
       BaseOptions(
-        connectTimeout: const Duration(seconds: 10),
-        receiveTimeout: const Duration(seconds: 15),
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 45),
         validateStatus: (status) => status != null && status < 500,
+        headers: {
+          'Accept': 'text/javascript,application/javascript;q=0.9,*/*;q=0.1',
+          'User-Agent': 'xiaoaitongxue-localjs-loader',
+        },
       ),
     );
 
@@ -26,11 +32,107 @@ class LocalJsSourceService {
     return LocalJsSourceService._(getJavascriptRuntime(), dio);
   }
 
+  /// 加载内置脚本
+  Future<String?> _loadBuiltinScript() async {
+    // 优先：尝试落雪（野草🌾）音乐源最新版本（多镜像）
+    try {
+      print('[XMC] 📦 [LocalJsSource] 内置优先：下载落雪（野草🌾）源 latest.js');
+      final mirrors = <String>[
+        'https://ghproxy.net/raw.githubusercontent.com/pdone/lx-music-source/main/grass/latest.js',
+        'https://raw.githubusercontent.com/pdone/lx-music-source/main/grass/latest.js',
+        'https://cdn.jsdelivr.net/gh/pdone/lx-music-source/grass/latest.js',
+        'https://fastly.jsdelivr.net/gh/pdone/lx-music-source/grass/latest.js',
+        'https://gcore.jsdelivr.net/gh/pdone/lx-music-source/grass/latest.js',
+        'https://testingcf.jsdelivr.net/gh/pdone/lx-music-source/grass/latest.js',
+      ];
+      for (final u in mirrors) {
+        try {
+          final resp = await _http.get<String>(
+            u,
+            options: Options(
+              responseType: ResponseType.plain,
+              sendTimeout: const Duration(seconds: 8),
+              receiveTimeout: const Duration(seconds: 12),
+              validateStatus:
+                  (code) => code != null && code >= 200 && code < 400,
+              headers: {
+                'Accept':
+                    'text/javascript,application/javascript;q=0.9,*/*;q=0.1',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'User-Agent': 'xiaoaitongxue-localjs-loader',
+              },
+            ),
+          );
+          final text = resp.data ?? '';
+          if (text.isNotEmpty) {
+            print(
+              '[XMC] ✅ [LocalJsSource] 落雪（野草🌾）脚本下载成功(${u.split('/')[2]}), 长度: ${text.length}',
+            );
+            // 使用解码器处理可能的混淆
+            return GrassSourceDecoder.decodeAndPrepareScript(text);
+          }
+        } catch (_) {
+          // 尝试下一个镜像
+          continue;
+        }
+      }
+      print('[XMC] ⚠️ [LocalJsSource] 野草🌾源下载失败，回退到旧的本地资产脚本');
+    } catch (e) {
+      print('[XMC] ⚠️ [LocalJsSource] 下载落雪（野草🌾）源异常: $e');
+    }
+
+    // 回退：使用旧的本地资产脚本
+    try {
+      print('[XMC] 📦 [LocalJsSource] 加载内置LX Custom Source脚本...');
+      final scriptContent = await rootBundle.loadString(
+        'assets/js/lx-custom-source.js',
+      );
+      print(
+        '[XMC] ✅ [LocalJsSource] 本地资产脚本加载成功，长度: ${scriptContent.length} 字符',
+      );
+      return scriptContent;
+    } catch (e) {
+      print('[XMC] ❌ [LocalJsSource] 本地资产脚本加载失败: $e');
+      return null;
+    }
+  }
+
+  /// 下载远程脚本
+  Future<String?> _downloadScript(String url) async {
+    try {
+      final resp = await _http.get<String>(
+        url,
+        options: Options(
+          responseType: ResponseType.plain,
+          sendTimeout: const Duration(seconds: 12),
+          receiveTimeout: const Duration(seconds: 45),
+          validateStatus: (code) => code != null && code >= 200 && code < 400,
+          headers: {
+            'Accept': 'text/javascript,application/javascript;q=0.9,*/*;q=0.1',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        ),
+      );
+      final script = resp.data ?? '';
+      if (script.isEmpty) {
+        print('[XMC] ⚠️ [LocalJsSource] 脚本内容为空: $url');
+        return null;
+      }
+      return script;
+    } catch (e) {
+      print('[XMC] ❌ [LocalJsSource] 下载脚本失败 $url: $e');
+      return null;
+    }
+  }
+
   Future<void> loadScript(SourceSettings settings) async {
-    print('🔧 [LocalJsSource] 开始加载JS音源');
-    print('🔧 [LocalJsSource] 启用状态: ${settings.enabled}');
-    print('🔧 [LocalJsSource] 脚本URL长度: ${settings.scriptUrl.length}');
-    print('🔧 [LocalJsSource] 脚本URL: ${settings.scriptUrl}');
+    print('[XMC] 🔧 [LocalJsSource] 开始加载JS音源');
+    print('[XMC] 🔧 [LocalJsSource] 启用状态: ${settings.enabled}');
+    print('[XMC] 🔧 [LocalJsSource] 使用内置脚本: ${settings.useBuiltinScript}');
+    print('[XMC] 🔧 [LocalJsSource] 脚本URL长度: ${settings.scriptUrl.length}');
+    print('[XMC] 🔧 [LocalJsSource] 脚本URL: ${settings.scriptUrl}');
     // 分段打印长URL，避免截断
     if (settings.scriptUrl.length > 100) {
       print(
@@ -42,12 +144,12 @@ class LocalJsSourceService {
     }
 
     if (!settings.enabled) {
-      print('❌ [LocalJsSource] 音源未启用');
+      print('[XMC] ❌ [LocalJsSource] 音源未启用');
       _loaded = false;
       return;
     }
-    if (settings.scriptUrl.isEmpty) {
-      print('❌ [LocalJsSource] 脚本URL为空');
+    if (!settings.useBuiltinScript && settings.scriptUrl.isEmpty) {
+      print('[XMC] ❌ [LocalJsSource] 远程脚本URL为空');
       _loaded = false;
       return;
     }
@@ -59,61 +161,67 @@ class LocalJsSourceService {
         !finalUrl.endsWith('/')) {
       if (finalUrl.endsWith('.j')) {
         finalUrl = finalUrl + 's';
-        print('🔧 [LocalJsSource] 检测到URL截断，自动修复: $finalUrl');
+        print('[XMC] 🔧 [LocalJsSource] 检测到URL截断，自动修复: $finalUrl');
       }
     }
-    // 定义多个镜像源，优先使用支持完整功能的脚本
-    final fallbackUrls = [
-      finalUrl, // 使用修复后的URL
-      // xiaoqiu.js - 支持完整的搜索和URL解析功能
-      'https://fastly.jsdelivr.net/gh/Huibq/keep-alive/Music_Free/xiaoqiu.js',
-      'https://cdn.jsdelivr.net/gh/Huibq/keep-alive/Music_Free/xiaoqiu.js',
-      'https://raw.githubusercontent.com/Huibq/keep-alive/main/Music_Free/xiaoqiu.js',
-      // sixyin - 仅搜索功能，作为备用
-      'https://cdn.jsdelivr.net/gh/pdone/lx-music-source/sixyin/latest.js',
-      'https://fastly.jsdelivr.net/gh/pdone/lx-music-source/sixyin/latest.js',
-      'https://gcore.jsdelivr.net/gh/pdone/lx-music-source/sixyin/latest.js',
-      'https://testingcf.jsdelivr.net/gh/pdone/lx-music-source/sixyin/latest.js',
-      // GitHub原始文件（备用）
-      'https://raw.githubusercontent.com/pdone/lx-music-source/main/sixyin/latest.js',
-      // 自定义CDN（备用）
-      'https://gitee.com/pdone/lx-music-source/raw/main/sixyin/latest.js',
-    ];
+    // 优先使用用户指定的脚本源，同时为同一脚本添加CDN镜像以避免raw.githubusercontent超时
+    final List<String> fallbackUrls = [finalUrl];
+    try {
+      if (finalUrl.contains('raw.githubusercontent.com') &&
+          finalUrl.contains('/pdone/lx-music-source/') &&
+          finalUrl.endsWith('/grass/latest.js')) {
+        // 替换为 jsDelivr 多个镜像
+        fallbackUrls.addAll([
+          'https://cdn.jsdelivr.net/gh/pdone/lx-music-source/grass/latest.js',
+          'https://fastly.jsdelivr.net/gh/pdone/lx-music-source/grass/latest.js',
+          'https://gcore.jsdelivr.net/gh/pdone/lx-music-source/grass/latest.js',
+        ]);
+      }
+    } catch (_) {}
 
     // 去重
     final uniqueUrls = fallbackUrls.toSet().toList();
 
-    print('🔄 [LocalJsSource] 尝试加载 ${uniqueUrls.length} 个镜像源');
-
-    for (final url in uniqueUrls) {
-      print('🌐 [LocalJsSource] 正在请求: $url');
-      try {
-        final resp = await _http.get<String>(
-          url,
-          options: Options(
-            responseType: ResponseType.plain,
-            sendTimeout: const Duration(seconds: 5),
-            receiveTimeout: const Duration(seconds: 8),
-            validateStatus: (code) => code != null && code >= 200 && code < 400,
-          ),
-        );
-        final script = resp.data ?? '';
-        print('📥 [LocalJsSource] 脚本下载成功，长度: ${script.length} 字符');
-
-        if (script.isEmpty) {
-          print('⚠️ [LocalJsSource] 脚本内容为空，尝试下个镜像');
-          continue; // 尝试下个镜像
+    // 根据设置选择脚本源
+    String? scriptContent;
+    if (settings.useBuiltinScript) {
+      // 使用内置脚本，不回退到远程脚本
+      scriptContent = await _loadBuiltinScript();
+      if (scriptContent == null || scriptContent.isEmpty) {
+        print('[XMC] ❌ [LocalJsSource] 内置脚本加载失败，且设置为仅使用内置脚本');
+      } else {
+        print('[XMC] ✅ [LocalJsSource] 内置脚本加载成功');
+      }
+    } else {
+      // 使用远程脚本
+      print('🔄 [LocalJsSource] 尝试加载 ${uniqueUrls.length} 个镜像源');
+      for (final url in uniqueUrls) {
+        print('🌐 [LocalJsSource] 正在请求: $url');
+        scriptContent = await _downloadScript(url);
+        if (scriptContent != null && scriptContent.isNotEmpty) {
+          print('[XMC] ✅ [LocalJsSource] 远程脚本加载成功: $url');
+          break;
         }
+      }
+    }
 
-        print('🍪 [LocalJsSource] 注入Cookie变量');
-        // 注入 cookie 变量
-        final cookieInit =
-            "var MUSIC_U='${settings.cookieNetease}'; var ts_last='${settings.cookieTencent}';";
-        _rt.evaluate(cookieInit);
+    if (scriptContent == null || scriptContent.isEmpty) {
+      print('[XMC] ❌ [LocalJsSource] 所有脚本源都加载失败');
+      _loaded = false;
+      return;
+    }
 
-        print('🔄 [LocalJsSource] 开始执行JS脚本...');
-        // 注入简易 LX 环境以兼容为 LX 定制的音源脚本
-        const String lxShim = r'''(function(){
+    // 执行脚本
+    try {
+      print('🍪 [LocalJsSource] 注入Cookie变量');
+      // 注入 cookie 变量
+      final cookieInit =
+          "var MUSIC_U='${settings.cookieNetease}'; var ts_last='${settings.cookieTencent}';";
+      _rt.evaluate(cookieInit);
+
+      print('🔄 [LocalJsSource] 开始执行JS脚本...');
+      // 注入简易 LX 环境以兼容为 LX 定制的音源脚本
+      const String lxShim = r'''(function(){
           try{
             var g = (typeof globalThis !== 'undefined') ? globalThis : (this||{});
             // 基础 polyfill
@@ -145,21 +253,33 @@ class LocalJsSourceService {
               g.Buffer = {
                 from: function(input, enc){
                   if (enc === 'base64') {
-                    var bin = g.atob(input);
+                    var bin = g.atob(String(input||''));
                     var len = bin.length;
-                    var bytes = new Uint8Array(len);
-                    for (var i=0;i<len;i++) bytes[i] = bin.charCodeAt(i) & 0xff;
-                    return bytes;
+                    var out = new Uint8Array(len);
+                    for (var i=0;i<len;i++) out[i] = bin.charCodeAt(i) & 0xff;
+                    return out;
                   }
                   if (typeof input === 'string') {
                     var utf8 = unescape(encodeURIComponent(input));
-                    var arr = new Uint8Array(utf8.length);
-                    for (var i=0;i<utf8.length;i++) arr[i] = utf8.charCodeAt(i);
-                    return arr;
+                    var out2 = new Uint8Array(utf8.length);
+                    for (var j=0;j<utf8.length;j++) out2[j] = utf8.charCodeAt(j);
+                    return out2;
                   }
-                  if (input && input.buffer) return new Uint8Array(input);
+                  // 支持 ArrayBuffer / TypedArray / Array
+                  if (input && (input.byteLength !== undefined)) return new Uint8Array(input);
+                  if (input && (input.buffer && input.byteLength !== undefined)) return new Uint8Array(input);
                   if (Array.isArray(input)) return new Uint8Array(input);
                   return new Uint8Array(0);
+                },
+                alloc: function(size, fill){ var buf = new Uint8Array(size|0); if (fill!==undefined) buf.fill(typeof fill==='number'?fill:0); return buf; },
+                allocUnsafe: function(size){ return new Uint8Array(size|0); },
+                concat: function(list, totalLength){
+                  if (!Array.isArray(list) || list.length===0) return new Uint8Array(0);
+                  var length = totalLength==null? list.reduce(function(a,b){ return a + (b? (b.length||0):0); }, 0) : totalLength;
+                  var res = new Uint8Array(length);
+                  var pos = 0;
+                  for (var i=0;i<list.length;i++){ var it=list[i]; if (it && it.length){ res.set(it, pos); pos += it.length; } }
+                  return res;
                 }
               };
             }
@@ -191,14 +311,24 @@ class LocalJsSourceService {
                 request: function(url, options, cb){
                   try{
                     var opts = options || {};
-                    fetch(url, opts).then(function(r){
-                      return r.text().then(function(t){
-                        var body; try{ body = JSON.parse(t); }catch(_){ body = t; }
-                        var headers = {}; try{ if (r.headers && r.headers.forEach) { r.headers.forEach(function(v,k){ headers[k]=v; }); } }catch(_){ }
-                        var resp = { statusCode: r.status, status: r.status, headers: headers, body: body };
-                        if (typeof cb === 'function') cb(null, resp);
-                      });
-                    }).catch(function(err){ if (typeof cb === 'function') cb(err); });
+                    if (typeof fetch === 'function') {
+                      fetch(url, opts).then(function(r){
+                        return r.text().then(function(t){
+                          var body; try{ body = JSON.parse(t); }catch(_){ body = t; }
+                          var headers = {}; try{ if (r.headers && r.headers.forEach) { r.headers.forEach(function(v,k){ headers[k]=v; }); } }catch(_){ }
+                          var resp = { statusCode: r.status, status: r.status, headers: headers, body: body };
+                          if (typeof cb === 'function') cb(null, resp);
+                        });
+                      }).catch(function(err){ if (typeof cb === 'function') cb(err); });
+                    } else {
+                      // 简易回退：使用XHR
+                      var xhr = new XMLHttpRequest();
+                      xhr.open(opts && opts.method ? opts.method : 'GET', url, true);
+                      if (opts && opts.headers){ try{ Object.keys(opts.headers).forEach(function(k){ xhr.setRequestHeader(k, String(opts.headers[k])); }); }catch(_){} }
+                      xhr.onload = function(){ var t = xhr.responseText||''; var body; try{ body = JSON.parse(t);}catch(_){ body=t; } var resp = { statusCode: xhr.status, status: xhr.status, headers: {}, body: body }; if (typeof cb==='function') cb(null, resp); };
+                      xhr.onerror = function(err){ if (typeof cb==='function') cb(err||new Error('xhr error')); };
+                      xhr.send(opts && opts.body ? opts.body : null);
+                    }
                   }catch(e){ if (typeof cb === 'function') cb(e); }
                 },
                 send: function(){},
@@ -206,168 +336,92 @@ class LocalJsSourceService {
             }
           }catch(e){}
         })()''';
-        _rt.evaluate(lxShim);
+      _rt.evaluate(lxShim);
 
-        // 为LocalJS注入网络请求和Promise支持
-        const String networkShim = r'''(function(){
+      // 为LocalJS注入网络请求和Promise支持
+      const String networkShim = r'''(function(){
           try{
             var g = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : this);
-            
-            // 注入基本的Promise支持
+
+            // 仅拦截指定的脚本更新检测地址，避免触发连接拒绝
+            if (typeof g.XMLHttpRequest !== 'undefined') {
+              var OriginalXHR = g.XMLHttpRequest;
+              g.XMLHttpRequest = function() {
+                var xhr = new OriginalXHR();
+                var _url = '';
+                var originalOpen = xhr.open;
+                var originalSend = xhr.send;
+                xhr.open = function(method, url, async, user, password) {
+                  try { _url = String(url||''); } catch(_) { _url = ''; }
+                  // 仅拦截 43.143.63.234:9763 的脚本检查请求
+                  if (_url.indexOf('http://43.143.63.234:9763/script') === 0) {
+                    xhr.__intercepted = true;
+                    setTimeout(function(){
+                      try {
+                        xhr.readyState = 4;
+                        xhr.status = 200;
+                        xhr.responseText = '{"code":0,"data":[],"list":[]}';
+                        if (typeof xhr.onreadystatechange === 'function') xhr.onreadystatechange();
+                        if (typeof xhr.onload === 'function') xhr.onload();
+                      } catch(_) {}
+                    }, 10);
+                    return; // 不调用原始open
+                  }
+                  return originalOpen.call(xhr, method, url, async, user, password);
+                };
+                xhr.send = function(data) {
+                  if (xhr.__intercepted) return; // 被拦截则不真正发送
+                  return originalSend.call(xhr, data);
+                };
+                return xhr;
+              };
+            }
+
+            // Promise 最小实现（如环境缺失）
             if (typeof g.Promise !== 'function') {
-              g.Promise = function(executor) {
-                var self = this;
-                self.state = 'pending';
-                self.value = undefined;
-                self.handlers = [];
-                
-                function resolve(value) {
-                  if (self.state === 'pending') {
-                    self.state = 'fulfilled';
-                    self.value = value;
-                    self.handlers.forEach(function(handler) {
-                      handler.onFulfilled(value);
-                    });
-                  }
-                }
-                
-                function reject(reason) {
-                  if (self.state === 'pending') {
-                    self.state = 'rejected';
-                    self.value = reason;
-                    self.handlers.forEach(function(handler) {
-                      handler.onRejected(reason);
-                    });
-                  }
-                }
-                
-                try {
-                  executor(resolve, reject);
-                } catch (e) {
-                  reject(e);
-                }
+              g.Promise = function(executor){
+                var self=this; self.state='pending'; self.value=void 0; self.handlers=[];
+                function resolve(v){ if(self.state==='pending'){ self.state='fulfilled'; self.value=v; self.handlers.forEach(function(h){ h.onFulfilled(v); }); } }
+                function reject(e){ if(self.state==='pending'){ self.state='rejected'; self.value=e; self.handlers.forEach(function(h){ h.onRejected(e); }); } }
+                try{ executor(resolve,reject); }catch(e){ reject(e); }
               };
-              
-              g.Promise.prototype.then = function(onFulfilled, onRejected) {
-                var self = this;
-                return new g.Promise(function(resolve, reject) {
-                  function handle() {
-                    if (self.state === 'fulfilled') {
-                      if (typeof onFulfilled === 'function') {
-                        try {
-                          resolve(onFulfilled(self.value));
-                        } catch (e) {
-                          reject(e);
-                        }
-                      } else {
-                        resolve(self.value);
-                      }
-                    } else if (self.state === 'rejected') {
-                      if (typeof onRejected === 'function') {
-                        try {
-                          resolve(onRejected(self.value));
-                        } catch (e) {
-                          reject(e);
-                        }
-                      } else {
-                        reject(self.value);
-                      }
-                    } else {
-                      self.handlers.push({
-                        onFulfilled: function(value) {
-                          if (typeof onFulfilled === 'function') {
-                            try {
-                              resolve(onFulfilled(value));
-                            } catch (e) {
-                              reject(e);
-                            }
-                          } else {
-                            resolve(value);
-                          }
-                        },
-                        onRejected: function(reason) {
-                          if (typeof onRejected === 'function') {
-                            try {
-                              resolve(onRejected(reason));
-                            } catch (e) {
-                              reject(e);
-                            }
-                          } else {
-                            reject(reason);
-                          }
-                        }
-                      });
-                    }
-                  }
-                  handle();
-                });
-              };
-              
-              g.Promise.resolve = function(value) {
-                return new g.Promise(function(resolve) {
-                  resolve(value);
-                });
-              };
-              
-              g.Promise.reject = function(reason) {
-                return new g.Promise(function(resolve, reject) {
-                  reject(reason);
-                });
-              };
+              g.Promise.prototype.then = function(onF,onR){ var self=this; return new g.Promise(function(res,rej){ function run(){ if(self.state==='fulfilled'){ try{ res(typeof onF==='function'? onF(self.value): self.value);}catch(e){ rej(e);} } else if(self.state==='rejected'){ try{ if(typeof onR==='function'){ res(onR(self.value)); } else { rej(self.value);} }catch(e){ rej(e);} } else { self.handlers.push({onFulfilled:function(v){ try{ res(typeof onF==='function'? onF(v): v);}catch(e){ rej(e);} }, onRejected:function(e){ try{ if(typeof onR==='function'){ res(onR(e)); } else { rej(e);} }catch(err){ rej(err);} }}); } } run(); }); };
+              g.Promise.resolve = function(v){ return new g.Promise(function(r){ r(v); }); };
+              g.Promise.reject = function(e){ return new g.Promise(function(_,r){ r(e); }); };
             }
-            
-            // 注入一个支持基本功能的fetch实现
-            if (typeof g.fetch !== 'function') {
-              g.fetch = function(url, options = {}) {
-                console.log('[LocalJS] fetch请求:', url);
-                
-                // 对于xiaoqiu.js等脚本，提供模拟响应避免报错
-                if (url.includes('qq.com') || url.includes('music')) {
-                  return g.Promise.resolve({
-                    ok: true,
-                    status: 200,
-                    statusText: 'OK',
-                    text: function() { return g.Promise.resolve('{"code":0,"data":{"list":[]}}'); },
-                    json: function() { return g.Promise.resolve({code: 0, data: {list: []}}); },
-                  });
-                }
-                
-                return g.Promise.resolve({
-                  ok: false,
-                  status: 0,
-                  statusText: 'LocalJS环境网络请求受限',
-                  text: function() { return g.Promise.resolve('{}'); },
-                  json: function() { return g.Promise.resolve({}); },
-                });
-              };
-            }
-            
-            // 为axios提供基本实现
+
+            // 提供最小可用的 axios（基于 XHR），避免依赖 fetch
             if (typeof g.axios !== 'function') {
-              g.axios = function(config) {
-                if (typeof config === 'string') {
-                  return g.fetch(config);
-                }
-                return g.fetch(config.url || '', config);
+              g.axios = function(config){
+                if (typeof config === 'string') config = { url: config, method: 'GET' };
+                config = config || {};
+                return new g.Promise(function(resolve, reject){
+                  try{
+                    var xhr = new XMLHttpRequest();
+                    var method = (config.method||'GET').toUpperCase();
+                    xhr.open(method, config.url||'', true);
+                    if (config.headers){ try{ Object.keys(config.headers).forEach(function(k){ xhr.setRequestHeader(k, String(config.headers[k])); }); }catch(_){} }
+                    xhr.responseType = 'text';
+                    xhr.onload = function(){ resolve({ data: xhr.responseText, status: xhr.status, statusText: xhr.statusText, headers: {} }); };
+                    xhr.onerror = function(){ reject(new Error('Network Error')); };
+                    xhr.send(config.data!=null ? (typeof config.data==='string'? config.data : JSON.stringify(config.data)) : null);
+                  }catch(e){ reject(e); }
+                });
               };
-              g.axios.get = function(url, config) {
-                return g.fetch(url, {method: 'GET', ...(config || {})});
-              };
-              g.axios.post = function(url, data, config) {
-                return g.fetch(url, {method: 'POST', body: data, ...(config || {})});
-              };
+              g.axios.get = function(url, cfg){ cfg = cfg||{}; cfg.url=url; cfg.method='GET'; return g.axios(cfg); };
+              g.axios.post = function(url, data, cfg){ cfg = cfg||{}; cfg.url=url; cfg.method='POST'; cfg.data=data; return g.axios(cfg); };
+              g.axios.default = g.axios;
             }
-            
+
             console.log('[LocalJS] 网络和Promise shim已注入');
-            
           }catch(e){
-            console.warn && console.warn('LocalJS NetworkShim error:', e);
+            try{ console.warn && console.warn('LocalJS NetworkShim error:', e); }catch(_){}
           }
         })()''';
-        _rt.evaluate(networkShim);
+      _rt.evaluate(networkShim);
 
-        // 优先注入CommonJS环境，确保exports和module在脚本执行前就存在
-        const String commonJsShim = r'''(function(){
+      // 优先注入CommonJS环境，确保exports和module在脚本执行前就存在
+      const String commonJsShim = r'''(function(){
           try{
             var g = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : this);
             
@@ -385,18 +439,17 @@ class LocalJsSourceService {
                 var method = (opts.method || 'GET').toUpperCase();
                 var headers = opts.headers || {};
                 var body = (opts.data!=null) ? (typeof opts.data==='string' ? opts.data : JSON.stringify(opts.data)) : undefined;
-                return fetch(opts.url, { method: method, headers: headers, body: body, credentials: 'include' })
-                  .then(function(r){ 
-                    return r.text().then(function(t){ 
-                      var d; 
-                      try{ 
-                        d = JSON.parse(t);
-                      }catch(_){ 
-                        d = t;
-                      } 
-                      return { data: d, status: r.status, statusText: r.statusText }; 
-                    }); 
-                  });
+                return new Promise(function(resolve, reject){
+                  try{
+                    if (typeof XMLHttpRequest === 'undefined') { return resolve({ data: '', status: 0, statusText: 'NO_XHR' }); }
+                    var xhr = new XMLHttpRequest();
+                    xhr.open(method, opts.url||'', true);
+                    Object.keys(headers).forEach(function(k){ try{ xhr.setRequestHeader(k, String(headers[k])); }catch(_){} });
+                    xhr.onload = function(){ var t = xhr.responseText||''; var d; try{ d = JSON.parse(t);}catch(_){ d=t; } resolve({ data: d, status: xhr.status, statusText: xhr.statusText }); };
+                    xhr.onerror = function(){ reject(new Error('Network Error')); };
+                    xhr.send(body);
+                  }catch(e){ reject(e); }
+                });
               }
               __axios.get = function(url, opts){ opts=opts||{}; return __axios({ url: url, method: 'GET', headers: (opts.headers||{}) }); };
               __axios.post = function(url, data, opts){ opts=opts||{}; return __axios({ url: url, method: 'POST', headers: (opts.headers||{}), data: data }); };
@@ -411,14 +464,87 @@ class LocalJsSourceService {
                           try{ return atob(s);}catch(e){ return ''; } 
                         } 
                       }; 
-                    } 
+                    },
+                    stringify: function(obj) {
+                      try {
+                        if (obj && typeof obj.toString === 'function') {
+                          return btoa(obj.toString());
+                        }
+                        return btoa(String(obj || ''));
+                      } catch(e) { 
+                        return ''; 
+                      }
+                    }
                   }, 
                   Utf8: {
-                    parse: function(s){ return { toString: function(){ return s || ''; } }; }
+                    parse: function(s){ return { toString: function(){ return s || ''; } }; },
+                    stringify: function(obj) {
+                      try {
+                        return String(obj || '');
+                      } catch(e) {
+                        return '';
+                      }
+                    }
+                  },
+                  Hex: {
+                    parse: function(s) {
+                      return { toString: function() { return s || ''; } };
+                    },
+                    stringify: function(obj) {
+                      try {
+                        return String(obj || '');
+                      } catch(e) {
+                        return '';
+                      }
+                    }
                   }
                 },
                 AES: {
-                  decrypt: function(){ return { toString: function(){ return ''; } }; }
+                  decrypt: function(ciphertext, key, cfg) { 
+                    // 简单的模拟解密，实际项目中应该使用真正的加密库
+                    return { toString: function(encoding) { 
+                      if (encoding && encoding.stringify) {
+                        return encoding.stringify({ toString: function() { return 'decrypted'; } });
+                      }
+                      return 'decrypted'; 
+                    } }; 
+                  },
+                  encrypt: function(message, key, cfg) {
+                    return { toString: function() { return 'encrypted'; } };
+                  }
+                },
+                DES: {
+                  decrypt: function(ciphertext, key, cfg) { 
+                    return { toString: function(encoding) { 
+                      if (encoding && encoding.stringify) {
+                        return encoding.stringify({ toString: function() { return 'decrypted'; } });
+                      }
+                      return 'decrypted'; 
+                    } }; 
+                  }
+                },
+                MD5: function(message) {
+                  return { toString: function() { return 'md5hash'; } };
+                },
+                SHA1: function(message) {
+                  return { toString: function() { return 'sha1hash'; } };
+                },
+                SHA256: function(message) {
+                  return { toString: function() { return 'sha256hash'; } };
+                },
+                HmacSHA1: function(message, key) {
+                  return { toString: function() { return 'hmacsha1'; } };
+                },
+                HmacSHA256: function(message, key) {
+                  return { toString: function() { return 'hmacsha256'; } };
+                },
+                mode: {
+                  ECB: {},
+                  CBC: {}
+                },
+                pad: {
+                  Pkcs7: {},
+                  NoPadding: {}
                 }
               };
               var he = { 
@@ -433,7 +559,7 @@ class LocalJsSourceService {
               
               var __cjs_cache = {};
               function __wrapDefault(obj){ try{ obj.default = obj.default || obj; }catch(_){} return obj; }
-              function require(name){
+               function require(name){
                 if (__cjs_cache[name]) return __cjs_cache[name];
                 if (name === 'axios') { __cjs_cache[name] = __axios; return __axios; }
                 if (name === 'crypto-js') { var c = __wrapDefault(CryptoJs); __cjs_cache[name]=c; return c; }
@@ -447,63 +573,18 @@ class LocalJsSourceService {
             console.warn && console.warn('LocalJS CommonJS shim error:', e);
           }
         })()''';
-        _rt.evaluate(commonJsShim);
-        _rt.evaluate(script);
+      _rt.evaluate(commonJsShim);
+      _rt.evaluate(scriptContent);
 
-        // 若为 Huibq 系列并缺搜索，尝试注入 Music_Free 插件集合
-        try {
-          final listUrls = [
-            'https://fastly.jsdelivr.net/gh/Huibq/keep-alive/Music_Free/myPlugins.json',
-            'https://cdn.jsdelivr.net/gh/Huibq/keep-alive/Music_Free/myPlugins.json',
-            'https://raw.githubusercontent.com/Huibq/keep-alive/main/Music_Free/myPlugins.json',
-          ];
-          String? listText;
-          for (final lu in listUrls) {
-            try {
-              final r = await _http.get<String>(
-                lu,
-                options: Options(responseType: ResponseType.plain),
-              );
-              listText = r.data;
-              if (listText != null && listText.isNotEmpty) break;
-            } catch (_) {}
-          }
-          if (listText != null && listText.isNotEmpty) {
-            print('📦 [LocalJsSource] 读取插件清单');
-            final Map<String, dynamic> json = jsonDecode(listText);
-            final List items = (json['plugins'] as List? ?? const []);
-            for (final it in items) {
-              final url = (it is Map ? it['url']?.toString() : null) ?? '';
-              if (url.isEmpty) continue;
-              try {
-                final pr = await _http.get<String>(
-                  url,
-                  options: Options(responseType: ResponseType.plain),
-                );
-                final script = pr.data ?? '';
-                if (script.isNotEmpty) {
-                  print('📦 [LocalJsSource] 注入插件: ' + url);
-                  _rt.evaluate(script);
-                }
-              } catch (_) {}
-            }
-          }
-        } catch (e) {
-          print('⚠️ [LocalJsSource] 加载插件清单失败: $e');
-        }
+      // 跳过额外插件加载，只使用用户指定的单一脚本源
+      print('[XMC] 🔒 [LocalJsSource] 只加载用户指定的脚本，跳过额外插件加载');
 
-        print('✅ [LocalJsSource] JS脚本执行成功！');
-        _loaded = true;
-        return; // 成功加载，退出
-      } catch (e) {
-        print('❌ [LocalJsSource] 加载失败: $url, 错误: $e');
-        continue; // 尝试下一个镜像
-      }
+      print('[XMC] ✅ [LocalJsSource] JS脚本执行成功！');
+      _loaded = true;
+    } catch (e) {
+      print('[XMC] ❌ [LocalJsSource] 脚本执行失败，错误: $e');
+      _loaded = false;
     }
-
-    // 如果所有镜像都失败
-    print('❌ [LocalJsSource] 所有镜像源都失败了！');
-    _loaded = false;
   }
 
   bool get isReady => _loaded;
@@ -582,10 +663,10 @@ class LocalJsSourceService {
     String platform = 'auto',
     int page = 1,
   }) async {
-    print('🔍 [LocalJsSource] 开始搜索: $keyword, 平台: $platform, 页面: $page');
+    print('[XMC] 🔍 [LocalJsSource] 开始搜索: $keyword, 平台: $platform, 页面: $page');
 
     if (!_loaded) {
-      print('❌ [LocalJsSource] 脚本未加载，无法搜索');
+      print('[XMC] ❌ [LocalJsSource] 脚本未加载，无法搜索');
       return const [];
     }
     final escapedKw = keyword.replaceAll("'", " ");
@@ -609,7 +690,7 @@ class LocalJsSourceService {
       final checkResult = _rt.evaluate(checkJs);
       if (checkResult.stringResult == 'yes') {
         workingFunction = funcName;
-        print('✅ [LocalJsSource] 找到可用函数: $funcName');
+        print('[XMC] ✅ [LocalJsSource] 找到可用函数: $funcName');
         break;
       }
     }
@@ -769,7 +850,7 @@ class LocalJsSourceService {
       result = res.stringResult;
       print('📤 [LocalJsSource] JS执行结果: $result');
     } else {
-      print('❌ [LocalJsSource] 标准函数未找到，开始混淆函数检测...');
+      print('[XMC] ❌ [LocalJsSource] 标准函数未找到，开始混淆函数检测...');
 
       // 改进的混淆函数检测
       try {
@@ -810,7 +891,9 @@ class LocalJsSourceService {
         final obfuscatedResult = _rt.evaluate(obfuscatedScanJs);
         final obfuscatedCandidates =
             jsonDecode(obfuscatedResult.stringResult) as List;
-        print('🔍 [LocalJsSource] 发现混淆函数候选: ${obfuscatedCandidates.length} 个');
+        print(
+          '[XMC] 🔍 [LocalJsSource] 发现混淆函数候选: ${obfuscatedCandidates.length} 个',
+        );
 
         // 测试每个候选函数
         for (final candidate in obfuscatedCandidates) {
@@ -838,7 +921,7 @@ class LocalJsSourceService {
 
             final testResult = _rt.evaluate(testJs);
             if (testResult.stringResult == 'valid') {
-              print('✅ [LocalJsSource] 找到可用的混淆函数: $candidate');
+              print('[XMC] ✅ [LocalJsSource] 找到可用的混淆函数: $candidate');
               workingFunction = candidate.toString();
 
               // 使用找到的混淆函数进行搜索
@@ -900,17 +983,17 @@ class LocalJsSourceService {
               // 跳过 skip/promise/invalid/error
             }
           } catch (e) {
-            print('⚠️ [LocalJsSource] 测试函数 $candidate 失败: $e');
+            print('[XMC] ⚠️ [LocalJsSource] 测试函数 $candidate 失败: $e');
             continue;
           }
         }
 
         if (workingFunction == null) {
-          print('❌ [LocalJsSource] 所有混淆函数都不可用');
+          print('[XMC] ❌ [LocalJsSource] 所有混淆函数都不可用');
           result = '[]';
         }
       } catch (e) {
-        print('⚠️ [LocalJsSource] 混淆函数检测异常: $e');
+        print('[XMC] ⚠️ [LocalJsSource] 混淆函数检测异常: $e');
         result = '[]';
       }
     }

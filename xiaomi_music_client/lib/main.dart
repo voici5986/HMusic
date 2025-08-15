@@ -77,7 +77,7 @@ class MyApp extends ConsumerWidget {
     );
 
     return MaterialApp.router(
-      title: '小爱音乐控制器',
+      title: '小爱音乐盒',
       themeMode: ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,

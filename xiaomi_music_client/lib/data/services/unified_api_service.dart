@@ -121,6 +121,8 @@ class UnifiedApiService {
         'Referer': 'https://music.txqq.pro/?name=$encodedId&type=$platform',
         'X-Requested-With': 'XMLHttpRequest',
         'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
       });
 
       // 使用songId作为input参数来获取播放链接
@@ -139,22 +141,37 @@ class UnifiedApiService {
           body = body.toString();
         }
 
+        print('🎵 [UnifiedAPI] 响应内容长度: ${body.length}');
+        if (body.length > 200) {
+          print('🎵 [UnifiedAPI] 响应内容预览: ${body.substring(0, 200)}...');
+        } else {
+          print('🎵 [UnifiedAPI] 响应内容: $body');
+        }
+
         dynamic jsonBody;
         try {
           jsonBody = jsonDecode(body);
-        } catch (_) {
-          print('❌ [UnifiedAPI] JSON解析失败');
+        } catch (e) {
+          print('❌ [UnifiedAPI] JSON解析失败: $e');
+          print('❌ [UnifiedAPI] 原始响应: $body');
           return null;
         }
 
         final List<dynamic> songs = jsonBody['data'] ?? [];
+        print('🎵 [UnifiedAPI] 解析到 ${songs.length} 首歌曲');
+
         if (songs.isNotEmpty) {
           final String? url = songs[0]['url']?.toString();
+          final String? title = songs[0]['title']?.toString();
+          final String? author = songs[0]['author']?.toString();
+
+          print('🎵 [UnifiedAPI] 歌曲信息: $title - $author');
+          print('🎵 [UnifiedAPI] 播放链接: $url');
 
           if (url != null && url.isNotEmpty) {
-            print('✅ [UnifiedAPI] 成功获取播放链接: $url');
             // 检查是否是有效链接
             if (url.startsWith('http')) {
+              print('✅ [UnifiedAPI] 成功获取播放链接: $url');
               return url;
             } else {
               print('⚠️ [UnifiedAPI] 无效的播放链接格式: $url');
@@ -162,10 +179,12 @@ class UnifiedApiService {
             }
           } else {
             print('❌ [UnifiedAPI] 响应中没有播放链接');
+            print('❌ [UnifiedAPI] 完整歌曲数据: ${songs[0]}');
             return null;
           }
         } else {
           print('❌ [UnifiedAPI] 没有找到对应的歌曲');
+          print('❌ [UnifiedAPI] 完整响应: $jsonBody');
           return null;
         }
       }
@@ -174,6 +193,24 @@ class UnifiedApiService {
       return null;
     } catch (e) {
       print('❌ [UnifiedAPI] 获取播放链接异常: $e');
+
+      // 如果是网络错误，尝试重试
+      if (e.toString().contains('SocketException') ||
+          e.toString().contains('TimeoutException') ||
+          e.toString().contains('Connection')) {
+        print('🔄 [UnifiedAPI] 检测到网络错误，尝试重试...');
+        try {
+          await Future.delayed(const Duration(seconds: 2));
+          return await getMusicUrl(
+            songId: songId,
+            platform: platform,
+            quality: quality,
+          );
+        } catch (retryError) {
+          print('❌ [UnifiedAPI] 重试失败: $retryError');
+        }
+      }
+
       return null;
     }
   }

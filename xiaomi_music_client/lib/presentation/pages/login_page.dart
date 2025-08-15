@@ -123,7 +123,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        '小爱音乐',
+                        '小爱音乐盒',
                         style: TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.bold,

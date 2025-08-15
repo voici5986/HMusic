@@ -239,12 +239,12 @@ class _TtsSettingsPageState extends ConsumerState<TtsSettingsPage> {
         // 🎯 等待TTS播放完成后，自动恢复音乐播放
         print('🎵 TTS播放完成，等待恢复音乐播放...');
         await Future.delayed(const Duration(seconds: 3)); // 等待TTS播放完成
-        
+
         try {
           // 尝试恢复音乐播放
           await apiService.resumeMusic(did: selectedDeviceId);
           print('🎵 音乐播放已恢复');
-          
+
           if (mounted) {
             AppSnackBar.show(
               context,
