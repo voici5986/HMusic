@@ -169,9 +169,6 @@ class _MainPageState extends ConsumerState<MainPage> {
                   case 'download_from_link':
                     _showDownloadFromLinkDialog();
                     break;
-                  case 'download_settings':
-                    context.push('/settings/download');
-                    break;
                   case 'download_tasks':
                     context.push('/downloads');
                     break;
@@ -257,23 +254,6 @@ class _MainPageState extends ConsumerState<MainPage> {
                           const SizedBox(width: 12),
                           Text(
                             '下载任务',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'download_settings',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.settings_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '下载设置',
                             style: TextStyle(color: onSurface.withOpacity(0.9)),
                           ),
                         ],

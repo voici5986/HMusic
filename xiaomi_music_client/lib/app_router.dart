@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'presentation/widgets/auth_wrapper.dart';
-import 'presentation/pages/settings/download_settings_page.dart';
 import 'presentation/pages/settings/download_tasks_page.dart';
 import 'presentation/pages/settings/ssh_settings_page.dart';
 import 'presentation/pages/settings/server_settings_page.dart';
@@ -21,11 +20,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) {
           return const AuthWrapper();
         },
-      ),
-      GoRoute(
-        path: '/settings/download',
-        name: 'download_settings',
-        builder: (context, state) => const DownloadSettingsPage(),
       ),
       GoRoute(
         path: '/downloads',
