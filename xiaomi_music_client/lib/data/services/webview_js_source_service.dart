@@ -620,7 +620,32 @@ class WebViewJsSourceService {
           );
         } catch (e) {
           print('❌ [NetworkBridge] 请求失败: $e');
-          // 返回错误给JS
+          // 如果是 LX 接口，尝试在 WebView 内直接使用 fetch 作为回退（规避原生网络栈问题）
+          try {
+            final lower = (msg.message.contains('http') ? jsonDecode(msg.message)['url']?.toString() : '')?.toLowerCase() ?? '';
+            if (lower.contains('lxmusicapi.onrender.com')) {
+              final data = jsonDecode(msg.message);
+              final requestId = data['id'] as String;
+              final jsHeaders = jsonEncode((data['headers'] as Map?) ?? {});
+              final jsMethod = jsonEncode(data['method'] ?? 'GET');
+              final jsUrl = jsonEncode(data['url']);
+              final fallbackJs = '''(async function(){
+                try{
+                  const res = await fetch(${jsUrl}, { method: ${jsMethod}, headers: ${jsHeaders} });
+                  const text = await res.text();
+                  const result = { id: ${jsonEncode(requestId)}, success: true, status: res.status, data: text };
+                  window.__networkCallback && window.__networkCallback(result);
+                }catch(err){
+                  const result = { id: ${jsonEncode(requestId)}, success: false, error: String(err) };
+                  window.__networkCallback && window.__networkCallback(result);
+                }
+              })();''';
+              await controller.runJavaScript(fallbackJs);
+              return;
+            }
+          } catch (_) {}
+
+          // 非 LX 接口或回退失败，返回错误给 JS
           try {
             final data = jsonDecode(msg.message);
             final requestId = data['id'] as String;
