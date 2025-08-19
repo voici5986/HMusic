@@ -137,6 +137,10 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
       key: const ValueKey('music_library_scaffold'),
       resizeToAvoidBottomInset: false,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      floatingActionButton: libraryState.isSelectionMode && 
+                            libraryState.selectedMusicNames.isNotEmpty
+          ? _buildFloatingDeleteButton(libraryState)
+          : null,
       body: RefreshIndicator(
         key: const ValueKey('music_library_refresh'),
         onRefresh: () async {
@@ -157,8 +161,6 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
               _buildStatistics(libraryState, onSurface),
               const SizedBox(height: 8),
               Expanded(child: _buildContent(libraryState)),
-              if (libraryState.isSelectionMode)
-                _buildBatchActionBar(libraryState),
             ],
           ),
         ),
@@ -264,6 +266,12 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
       return const SizedBox.shrink();
     }
 
+    // 选择模式下显示选择状态栏
+    if (libraryState.isSelectionMode) {
+      return _buildSelectionBar(libraryState, onSurface);
+    }
+
+    // 普通模式下显示统计信息
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -283,17 +291,13 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  libraryState.isSelectionMode 
-                      ? Icons.check_circle_outline
-                      : Icons.music_note_rounded,
+                  Icons.music_note_rounded,
                   size: 16,
                   color: Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  libraryState.isSelectionMode
-                      ? '已选择 ${libraryState.selectedMusicNames.length} 首'
-                      : '${libraryState.filteredMusicList.length} 首',
+                  '${libraryState.filteredMusicList.length} 首',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.primary,
                     fontSize: 13,
@@ -303,7 +307,7 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
               ],
             ),
           ),
-          if (libraryState.searchQuery.isNotEmpty && !libraryState.isSelectionMode) ...[
+          if (libraryState.searchQuery.isNotEmpty) ...[
             const SizedBox(width: 8),
             Text(
               '从 ${libraryState.musicList.length} 首中筛选',
@@ -313,36 +317,28 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
           
           const Spacer(),
           
-          // 批量选择按钮（移动到这里）
+          // 批量选择按钮
           if (libraryState.filteredMusicList.isNotEmpty)
             Container(
               decoration: BoxDecoration(
-                color: libraryState.isSelectionMode 
-                    ? Colors.orange.withOpacity(0.1)
-                    : Theme.of(context).colorScheme.surface,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: libraryState.isSelectionMode 
-                      ? Colors.orange.withOpacity(0.3)
-                      : onSurface.withOpacity(0.1), 
+                  color: onSurface.withOpacity(0.1), 
                   width: 1,
                 ),
               ),
               child: IconButton(
                 visualDensity: VisualDensity.compact,
                 icon: Icon(
-                  libraryState.isSelectionMode 
-                      ? Icons.close_rounded 
-                      : Icons.checklist_rounded,
-                  color: libraryState.isSelectionMode 
-                      ? Colors.orange
-                      : onSurface.withOpacity(0.7),
+                  Icons.checklist_rounded,
+                  color: onSurface.withOpacity(0.7),
                   size: 18,
                 ),
                 onPressed: () {
                   ref.read(musicLibraryProvider.notifier).toggleSelectionMode();
                 },
-                tooltip: libraryState.isSelectionMode ? '退出选择' : '批量选择',
+                tooltip: '批量选择',
               ),
             ),
         ],
@@ -350,93 +346,86 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
     );
   }
 
-  Widget _buildBatchActionBar(MusicLibraryState libraryState) {
+  Widget _buildSelectionBar(MusicLibraryState libraryState, Color onSurface) {
     final isAllSelected = libraryState.selectedMusicNames.length == 
                          libraryState.filteredMusicList.length &&
                          libraryState.filteredMusicList.isNotEmpty;
     
     return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border(
-          top: BorderSide(
-            color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+          bottom: BorderSide(
+            color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
           ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+      ),
+      child: Row(
+        children: [
+          // 全选按钮
+          GestureDetector(
+            onTap: () {
+              if (isAllSelected) {
+                ref.read(musicLibraryProvider.notifier).clearSelection();
+              } else {
+                ref.read(musicLibraryProvider.notifier).selectAllMusic();
+              }
+            },
+            child: Text(
+              '全选',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          
+          const Spacer(),
+          
+          // 选中数量显示
+          Text(
+            '已选中 ${libraryState.selectedMusicNames.length} 项',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          
+          const Spacer(),
+          
+          // 关闭按钮
+          GestureDetector(
+            onTap: () {
+              ref.read(musicLibraryProvider.notifier).toggleSelectionMode();
+            },
+            child: Icon(
+              Icons.close,
+              color: onSurface.withOpacity(0.7),
+              size: 24,
+            ),
           ),
         ],
       ),
-      child: SafeArea(
-        minimum: const EdgeInsets.only(bottom: 8),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: Row(
-            children: [
-              // 全选/取消全选按钮
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    if (isAllSelected) {
-                      ref.read(musicLibraryProvider.notifier).clearSelection();
-                    } else {
-                      ref.read(musicLibraryProvider.notifier).selectAllMusic();
-                    }
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: isAllSelected 
-                        ? Colors.orange 
-                        : Theme.of(context).colorScheme.primary,
-                    side: BorderSide(
-                      color: isAllSelected 
-                          ? Colors.orange 
-                          : Theme.of(context).colorScheme.primary,
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  icon: Icon(
-                    isAllSelected ? Icons.deselect : Icons.select_all,
-                    size: 18,
-                  ),
-                  label: Text(
-                    isAllSelected ? '取消全选' : '全选',
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ),
-              
-              const SizedBox(width: 12),
-              
-              // 批量删除按钮
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: libraryState.selectedMusicNames.isNotEmpty
-                      ? () => _showBatchDeleteDialog(libraryState)
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: libraryState.selectedMusicNames.isNotEmpty
-                        ? Colors.red
-                        : Colors.grey.withOpacity(0.3),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                  icon: const Icon(Icons.delete, size: 18),
-                  label: Text(
-                    libraryState.selectedMusicNames.isEmpty
-                        ? '删除'
-                        : '删除 (${libraryState.selectedMusicNames.length})',
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ),
-            ],
-          ),
+    );
+  }
+
+  Widget _buildFloatingDeleteButton(MusicLibraryState libraryState) {
+    return FloatingActionButton.extended(
+      onPressed: () => _showBatchDeleteDialog(libraryState),
+      backgroundColor: Colors.red,
+      foregroundColor: Colors.white,
+      icon: const Icon(Icons.delete),
+      label: Text(
+        '删除 (${libraryState.selectedMusicNames.length})',
+        style: const TextStyle(
+          fontWeight: FontWeight.w600,
         ),
       ),
+      elevation: 8,
+      heroTag: "delete_fab",
     );
   }
 
@@ -608,9 +597,7 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
         padding: EdgeInsets.only(
           left: 16,
           right: 16,
-          bottom: libraryState.isSelectionMode 
-              ? 100 // 为批量操作工具栏留出空间
-              : AppLayout.contentBottomPadding(context),
+          bottom: AppLayout.contentBottomPadding(context),
         ),
         itemCount: musicList.length,
         itemBuilder: (context, index) {
