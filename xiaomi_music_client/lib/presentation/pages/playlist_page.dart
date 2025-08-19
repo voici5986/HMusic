@@ -150,9 +150,8 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
               itemCount: playlistState.playlists.length,
               itemBuilder: (context, index) {
                 final playlist = playlistState.playlists[index];
-                final deletable = playlistState.deletablePlaylists.contains(
-                  playlist.name,
-                );
+                // 注释：在测试模式下不检查deletable，强制显示所有删除选项
+                // final deletable = playlistState.deletablePlaylists.contains(playlist.name);
                 return Card(
                   margin: const EdgeInsets.symmetric(vertical: 3.0),
                   shape: RoundedRectangleBorder(
@@ -247,9 +246,11 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
                                   context: context,
                                   builder:
                                       (ctx) => AlertDialog(
-                                        title: const Text('删除列表'),
+                                        title: const Text('删除列表 [测试模式]'),
                                         content: Text(
-                                          '确定删除 "${playlist.name}" 吗？此操作不可撤销。',
+                                          '⚠️ 测试模式：正在尝试删除 "${playlist.name}"\n\n'
+                                          '这可能是系统播放列表。删除后可能会影响应用功能。\n\n'
+                                          '确定要继续吗？',
                                         ),
                                         actions: [
                                           TextButton(
@@ -275,19 +276,22 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
                                         context,
                                         SnackBar(
                                           content: Text(
-                                            '已删除列表：${playlist.name}',
+                                            '✅ 测试成功：已删除列表 "${playlist.name}"',
                                           ),
                                           backgroundColor: Colors.green,
+                                          duration: const Duration(seconds: 5),
                                         ),
                                       );
                                     }
                                   } catch (e) {
+                                    print('🧪 [测试] 删除播放列表失败: ${playlist.name}, 错误: $e');
                                     if (mounted) {
                                       AppSnackBar.show(
                                         context,
                                         SnackBar(
-                                          content: Text('删除失败：$e'),
-                                          backgroundColor: Colors.red,
+                                          content: Text('🧪 测试结果：删除失败\n播放列表: ${playlist.name}\n错误: $e'),
+                                          backgroundColor: Colors.orange,
+                                          duration: const Duration(seconds: 8),
                                         ),
                                       );
                                     }
@@ -302,11 +306,11 @@ class _PlaylistPageState extends ConsumerState<PlaylistPage> {
                                   value: 'open',
                                   child: Text('打开'),
                                 ),
-                                if (deletable)
-                                  const PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('删除列表'),
-                                  ),
+                                // 临时修改：强制显示删除选项以测试系统播放列表删除
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('删除列表 [测试]'),
+                                ),
                               ],
                           icon: Icon(
                             Icons.more_vert_rounded,
