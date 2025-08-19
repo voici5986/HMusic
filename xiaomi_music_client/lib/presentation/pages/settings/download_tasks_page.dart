@@ -15,13 +15,22 @@ class _DownloadTasksPageState extends ConsumerState<DownloadTasksPage> {
 
   Future<void> _load() async {
     final api = ref.read(apiServiceProvider);
-    if (api == null) return;
-    setState(() => _loading = true);
+    if (api == null) {
+      if (mounted) {
+        setState(() {
+          _log = '未连接到服务器';
+          _loading = false;
+        });
+      }
+      return;
+    }
+    
+    if (mounted) setState(() => _loading = true);
     try {
       final text = await api.getDownloadLog();
-      setState(() => _log = text);
-    } catch (_) {
-      setState(() => _log = '');
+      if (mounted) setState(() => _log = text);
+    } catch (e) {
+      if (mounted) setState(() => _log = '获取日志失败: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -41,8 +50,9 @@ class _DownloadTasksPageState extends ConsumerState<DownloadTasksPage> {
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          children: [
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -87,6 +97,8 @@ class _DownloadTasksPageState extends ConsumerState<DownloadTasksPage> {
                   )
                 else
                   Container(
+                    width: double.infinity,
+                    height: 300,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: onSurface.withOpacity(0.02),
@@ -94,13 +106,13 @@ class _DownloadTasksPageState extends ConsumerState<DownloadTasksPage> {
                       border: Border.all(color: onSurface.withOpacity(0.06)),
                     ),
                     child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Text(
+                      child: SelectableText(
                         _log,
                         style: TextStyle(
                           fontFamily: 'monospace',
-                          fontSize: 12,
+                          fontSize: 11,
                           color: onSurface.withOpacity(0.85),
+                          height: 1.4,
                         ),
                       ),
                     ),

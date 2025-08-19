@@ -278,10 +278,10 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
         return;
       }
 
-      // 使用“歌曲名-作者名”作为服务端下载名称
+      // 使用"歌曲名 - 作者名"作为服务端下载名称
       final safeTitle = item.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final safeAuthor = item.author.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final serverName = safeAuthor.isNotEmpty ? '$safeTitle-$safeAuthor' : safeTitle;
+      final serverName = safeAuthor.isNotEmpty ? '$safeTitle - $safeAuthor' : safeTitle;
 
       await ref
           .read(musicLibraryProvider.notifier)
@@ -330,7 +330,7 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
           await getApplicationDocumentsDirectory();
       final titlePart = item.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
       final authorPart = item.author.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final safeName = authorPart.isNotEmpty ? '$titlePart-$authorPart' : titlePart;
+      final safeName = authorPart.isNotEmpty ? '$titlePart - $authorPart' : titlePart;
       final ext = p.extension(Uri.parse(url).path);
       final filePath = p.join(
         dir.path,
