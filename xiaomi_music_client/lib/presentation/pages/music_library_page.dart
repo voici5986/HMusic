@@ -382,7 +382,7 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
     return Container(
       margin: const EdgeInsets.only(
         bottom: 120, // 向上移动更多，避免遮挡最后一个选择框
-        right: 32,   // 向左移动，与选择框中心对齐
+        right: 56,   // 调整位置使按钮中心与选择框中心对齐
       ),
       child: FloatingActionButton(
         onPressed: () => _showBatchDeleteDialog(libraryState),
