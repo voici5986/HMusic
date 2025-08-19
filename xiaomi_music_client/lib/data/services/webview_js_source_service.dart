@@ -536,8 +536,6 @@ class WebViewJsSourceService {
             }
 
             headers.putIfAbsent('X-Request-Key', () => _currentApiKey!);
-            // 同时设置小写变体，兼容大小写严格匹配的后端
-            headers.putIfAbsent('x-request-key', () => _currentApiKey!);
             // 对齐示例：即便是GET也显式设置 Content-Type
             headers['Content-Type'] = 'application/json';
             // 模拟 LX 客户端 UA
