@@ -12,6 +12,10 @@ class MusicSearchState {
   final String? error;
   final String searchQuery;
   final List<OnlineMusicResult> onlineResults;
+  final int currentPage;
+  final bool isLoadingMore;
+  final bool hasMore;
+  final String? sourceApiUsed; // 'js_builtin' or 'unified'
 
   const MusicSearchState({
     this.searchResults = const [],
@@ -19,6 +23,10 @@ class MusicSearchState {
     this.error,
     this.searchQuery = '',
     this.onlineResults = const [],
+    this.currentPage = 1,
+    this.isLoadingMore = false,
+    this.hasMore = true,
+    this.sourceApiUsed,
   });
 
   MusicSearchState copyWith({
@@ -27,6 +35,10 @@ class MusicSearchState {
     String? error,
     String? searchQuery,
     List<OnlineMusicResult>? onlineResults,
+    int? currentPage,
+    bool? isLoadingMore,
+    bool? hasMore,
+    String? sourceApiUsed,
   }) {
     return MusicSearchState(
       searchResults: searchResults ?? this.searchResults,
@@ -34,6 +46,10 @@ class MusicSearchState {
       error: error,
       searchQuery: searchQuery ?? this.searchQuery,
       onlineResults: onlineResults ?? this.onlineResults,
+      currentPage: currentPage ?? this.currentPage,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      hasMore: hasMore ?? this.hasMore,
+      sourceApiUsed: sourceApiUsed ?? this.sourceApiUsed,
     );
   }
 }
@@ -81,7 +97,14 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
 
     try {
       print('[XMC] 🔍 searchOnline: start query="$query"');
-      state = state.copyWith(isLoading: true, searchQuery: query, error: null);
+      state = state.copyWith(
+        isLoading: true,
+        searchQuery: query,
+        error: null,
+        currentPage: 1,
+        isLoadingMore: false,
+        hasMore: true,
+      );
 
       // 等待音源设置完成加载，避免读取到默认值
       final settingsNotifier = ref.read(sourceSettingsProvider.notifier);
@@ -101,27 +124,39 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
       print('[XMC] 🔧 [MusicSearch] 统一API地址: ${settings.unifiedApiBase}');
 
       List<OnlineMusicResult> parsed = [];
+      String sourceUsed = 'unified';
 
       // 根据primarySource设置选择音源
       if (settings.primarySource == 'js_external') {
         print('[XMC] 🎵 [MusicSearch] 使用JS外置音源');
-        parsed = await _searchUsingJsSource(query, settings, ref);
+        parsed = await _searchUsingJsSource(query, settings, ref, page: 1);
+        sourceUsed = 'js_builtin';
 
         // 如果JS音源搜索失败，回退到统一API
         if (parsed.isEmpty && settings.useUnifiedApi) {
           print('[XMC] 🔄 [MusicSearch] JS音源无结果，回退到统一API');
-          parsed = await _searchUsingUnifiedAPI(query, settings, ref);
+          parsed = await _searchUsingUnifiedAPI(query, settings, ref, page: 1);
+          sourceUsed = 'unified';
         }
       } else if (settings.primarySource == 'unified' ||
           settings.useUnifiedApi) {
         print('[XMC] 🎵 [MusicSearch] 使用统一API');
-        parsed = await _searchUsingUnifiedAPI(query, settings, ref);
+        parsed = await _searchUsingUnifiedAPI(query, settings, ref, page: 1);
+        sourceUsed = 'unified';
       } else {
         print('[XMC] ⚠️ [MusicSearch] 无可用音源，使用默认统一API');
-        parsed = await _searchUsingUnifiedAPI(query, settings, ref);
+        parsed = await _searchUsingUnifiedAPI(query, settings, ref, page: 1);
+        sourceUsed = 'unified';
       }
 
-      state = state.copyWith(isLoading: false, onlineResults: parsed);
+      state = state.copyWith(
+        isLoading: false,
+        onlineResults: parsed,
+        currentPage: 1,
+        hasMore: parsed.isNotEmpty,
+        isLoadingMore: false,
+        sourceApiUsed: sourceUsed,
+      );
       print('[XMC] 🔍 searchOnline: done, parsed=${parsed.length}');
     } catch (e) {
       print('[XMC] 🔍 searchOnline: error=$e');
@@ -139,8 +174,9 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
   Future<List<OnlineMusicResult>> _searchUsingJsSource(
     String query,
     SourceSettings settings,
-    Ref ref,
-  ) async {
+    Ref ref, {
+    required int page,
+  }) async {
     try {
       print('🎵 [MusicSearch] JS音源模式');
 
@@ -153,7 +189,7 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
                 query,
                 // JS 模式下固定为 auto，让脚本自适应平台
                 platform: 'auto',
-                page: 1,
+                page: page,
               )
               .timeout(
                 const Duration(seconds: 18),
@@ -196,7 +232,7 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
             .search(
               query,
               platform: settings.platform == 'auto' ? 'qq' : settings.platform,
-              page: 1,
+              page: page,
             )
             .timeout(
               const Duration(seconds: 15),
@@ -250,8 +286,9 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
   Future<List<OnlineMusicResult>> _searchUsingUnifiedAPI(
     String query,
     SourceSettings settings,
-    Ref ref,
-  ) async {
+    Ref ref, {
+    required int page,
+  }) async {
     try {
       print('🎵 [MusicSearch] 统一API模式');
       final unifiedService = ref.read(unifiedApiServiceProvider);
@@ -261,7 +298,7 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
             .searchMusic(
               query: query,
               platform: settings.platform == 'auto' ? 'qq' : settings.platform,
-              page: 1,
+              page: page,
             )
             .timeout(
               const Duration(seconds: 15),
@@ -277,6 +314,70 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
     } catch (e) {
       print('[XMC] ❌ [MusicSearch] 统一API搜索失败: $e');
       return [];
+    }
+  }
+
+  /// 加载下一页
+  Future<void> loadMore() async {
+    final query = state.searchQuery.trim();
+    if (query.isEmpty ||
+        state.isLoading ||
+        state.isLoadingMore ||
+        !state.hasMore) {
+      return;
+    }
+
+    final nextPage = state.currentPage + 1;
+    try {
+      state = state.copyWith(isLoadingMore: true);
+
+      // 读取当前设置以获取平台
+      final settings = ref.read(sourceSettingsProvider);
+
+      // 确定使用的音源
+      final sourceUsed =
+          state.sourceApiUsed ??
+          (settings.primarySource == 'js_external' ? 'js_builtin' : 'unified');
+
+      List<OnlineMusicResult> pageResults = [];
+      if (sourceUsed == 'js_builtin') {
+        // 先尝试 WebView JS，再回退 LocalJS
+        pageResults = await _searchUsingJsSource(
+          query,
+          settings,
+          ref,
+          page: nextPage,
+        );
+        if (pageResults.isEmpty && settings.primarySource != 'js_external') {
+          // 如果不是强制JS，尝试统一API作为兜底
+          pageResults = await _searchUsingUnifiedAPI(
+            query,
+            settings,
+            ref,
+            page: nextPage,
+          );
+        }
+      } else {
+        pageResults = await _searchUsingUnifiedAPI(
+          query,
+          settings,
+          ref,
+          page: nextPage,
+        );
+      }
+
+      final bool hasMore = pageResults.isNotEmpty;
+      final List<OnlineMusicResult> merged = List.of(state.onlineResults)
+        ..addAll(pageResults);
+
+      state = state.copyWith(
+        onlineResults: merged,
+        isLoadingMore: false,
+        hasMore: hasMore,
+        currentPage: hasMore ? nextPage : state.currentPage,
+      );
+    } catch (e) {
+      state = state.copyWith(isLoadingMore: false, hasMore: false);
     }
   }
 
