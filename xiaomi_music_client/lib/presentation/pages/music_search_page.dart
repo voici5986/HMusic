@@ -782,15 +782,20 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
               );
               final downloadUrl = qualityUrl ?? playUrl;
 
+              // 使用"歌曲名 - 作者名"格式作为文件名
+              final safeTitle = item.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+              final safeAuthor = item.author.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+              final fileName = safeAuthor.isNotEmpty ? '$safeTitle - $safeAuthor' : safeTitle;
+
               await ref
                   .read(musicLibraryProvider.notifier)
-                  .downloadOneMusic(item.title, url: downloadUrl);
+                  .downloadOneMusic(fileName, url: downloadUrl);
 
               if (mounted) {
                 AppSnackBar.show(
                   context,
                   SnackBar(
-                    content: Text('已添加到音乐库: ${item.title} ($selectedQuality)'),
+                    content: Text('已添加到音乐库: $fileName ($selectedQuality)'),
                     backgroundColor: Colors.blue,
                     duration: Duration(seconds: 3),
                   ),
@@ -834,14 +839,19 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
       }
 
       // 🎯 原有的下载逻辑作为回退方案
+      // 使用"歌曲名 - 作者名"格式
+      final safeTitle = item.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final safeAuthor = item.author.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final fallbackFileName = safeAuthor.isNotEmpty ? '$safeTitle - $safeAuthor' : safeTitle;
+      
       await ref
           .read(musicLibraryProvider.notifier)
-          .downloadOneMusic(item.title, url: playUrl);
+          .downloadOneMusic(fallbackFileName, url: playUrl);
       if (mounted) {
         AppSnackBar.show(
           context,
           SnackBar(
-            content: Text('已提交播放/下载：${item.title}'),
+            content: Text('已提交播放/下载：$fallbackFileName'),
             backgroundColor: Colors.green,
           ),
         );
