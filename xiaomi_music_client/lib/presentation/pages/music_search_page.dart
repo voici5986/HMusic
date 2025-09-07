@@ -661,13 +661,13 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
             );
           }
 
-          print('[XMC] 🎵 [Play] 准备调用 playUrl 接口...');
+          print('[XMC] 🎵 [Play] 准备调用智能播放接口...');
           print(
             '🎵 [Play] 接口参数: did=$selectedDeviceId, url=${playUrl.substring(0, playUrl.length > 100 ? 100 : playUrl.length)}...',
           );
 
-          // 🎯 调用播放接口
-          await apiService.playUrl(did: selectedDeviceId, url: playUrl);
+          // 🎯 使用智能播放接口，自动判断是否需要代理
+          await apiService.playUrlSmart(did: selectedDeviceId, url: playUrl);
 
           print('[XMC] ✅ [Play] 直接播放请求成功');
 

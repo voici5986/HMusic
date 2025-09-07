@@ -1,6 +1,8 @@
 import '../../core/network/dio_client.dart';
 import 'package:dio/dio.dart';
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import '../../core/constants/app_constants.dart';
 
 class UploadFile {
@@ -182,6 +184,49 @@ class MusicApiService {
 
   Future<void> playUrl({required String did, required String url}) async {
     await _client.get('/playurl', queryParameters: {'did': did, 'url': url});
+  }
+
+  // 代理播放 - 用于需要代理的链接
+  Future<void> playUrlWithProxy({required String did, required String url}) async {
+    // 构建完整的代理URL
+    final baseUrl = _client.baseUrl ?? 'http://localhost:58090';
+    final proxyUrl = '$baseUrl/proxy?urlb64=${_encodeUrlToBase64(url)}';
+    debugPrint('构建代理URL: $proxyUrl');
+    await _client.get('/playurl', queryParameters: {'did': did, 'url': proxyUrl});
+  }
+
+  // 智能播放 - 自动判断是否需要代理
+  Future<void> playUrlSmart({required String did, required String url}) async {
+    if (_needsProxy(url)) {
+      debugPrint('使用代理播放: $url');
+      await playUrlWithProxy(did: did, url: url);
+    } else {
+      debugPrint('直接播放: $url');
+      await playUrl(did: did, url: url);
+    }
+  }
+
+  // 判断URL是否需要代理
+  bool _needsProxy(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    
+    // 需要代理的域名列表
+    const proxyDomains = [
+      'ws.stream.qqmusic.qq.com',    // QQ音乐
+      'music.163.com',               // 网易云音乐  
+      'freetyst.nf.migu.cn',         // 咪咕音乐
+      'antiserver.kuwo.cn',          // 酷我音乐
+      'fs.taihe.com',                // 百度音乐
+      // 可以根据需要添加更多需要代理的域名
+    ];
+    
+    return proxyDomains.any((domain) => uri.host.contains(domain));
+  }
+
+  // Base64编码URL
+  String _encodeUrlToBase64(String url) {
+    return base64Encode(utf8.encode(url));
   }
 
   Future<void> playTts({required String did, required String text}) async {
