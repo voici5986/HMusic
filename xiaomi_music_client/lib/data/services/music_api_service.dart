@@ -101,6 +101,64 @@ class MusicApiService {
     return response.data as Map<String, dynamic>;
   }
 
+  // 保存设置接口
+  Future<dynamic> saveSetting(Map<String, dynamic> settings) async {
+    final response = await _client.post('/savesetting', data: settings);
+    return response.data; // 直接返回原始数据，可能是字符串或Map
+  }
+
+  // 播放音乐列表接口
+  Future<dynamic> playMusicList({
+    required String did,
+    required String listName,
+    required String musicName,
+  }) async {
+    final response = await _client.post('/playmusiclist', data: {
+      'did': did,
+      'listname': listName,
+      'musicname': musicName,
+    });
+    return response.data; // 直接返回原始数据，可能是字符串或Map
+  }
+
+  // 通过设置在线播放列表来播放音乐
+  Future<void> playOnlineMusic({
+    required String did,
+    required String musicUrl,
+    required String musicTitle,
+    required String musicAuthor,
+  }) async {
+    // 第一步：构造音乐列表数据
+    final musicListJson = [
+      {
+        "name": "在线播放",
+        "musics": [
+          {
+            "name": "$musicTitle - $musicAuthor",
+            "url": musicUrl,
+          }
+        ]
+      }
+    ];
+
+    // 第二步：获取当前设置，然后更新音乐列表
+    final currentSettings = await getSettings();
+    final updatedSettings = Map<String, dynamic>.from(currentSettings);
+    updatedSettings['music_list_json'] = jsonEncode(musicListJson);
+
+    // 第三步：保存设置
+    final saveResult = await saveSetting(updatedSettings);
+    debugPrint('保存设置结果: $saveResult');
+
+    // 第四步：播放音乐
+    final playResult = await playMusicList(
+      did: did,
+      listName: "在线播放",
+      musicName: "$musicTitle - $musicAuthor",
+    );
+    debugPrint('播放结果: $playResult');
+  }
+
   Future<List<dynamic>> searchMusic(String name) async {
     final response = await _client.get(
       '/searchmusic',
@@ -284,21 +342,6 @@ class MusicApiService {
       queryParameters: {'name': playlistName},
     );
     return response.data as Map<String, dynamic>;
-  }
-
-  Future<void> playMusicList({
-    required String deviceId,
-    required String playlistName,
-    String? musicName,
-  }) async {
-    await _client.post(
-      '/playmusiclist',
-      data: {
-        'did': deviceId,
-        'listname': playlistName,
-        'musicname': musicName ?? '',
-      },
-    );
   }
 
   Future<void> createPlaylist(String name) async {

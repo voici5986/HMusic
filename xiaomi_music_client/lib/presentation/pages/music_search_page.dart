@@ -666,8 +666,13 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
             '🎵 [Play] 接口参数: did=$selectedDeviceId, url=${playUrl.substring(0, playUrl.length > 100 ? 100 : playUrl.length)}...',
           );
 
-          // 🎯 使用智能播放接口，自动判断是否需要代理
-          await apiService.playUrlSmart(did: selectedDeviceId, url: playUrl);
+          // 🎯 使用新的在线播放逻辑，通过音乐列表设置来播放
+          await apiService.playOnlineMusic(
+            did: selectedDeviceId,
+            musicUrl: playUrl,
+            musicTitle: item.title,
+            musicAuthor: item.author,
+          );
 
           print('[XMC] ✅ [Play] 播放请求成功');
 

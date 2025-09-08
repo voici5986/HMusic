@@ -141,9 +141,9 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
       state = state.copyWith(isLoading: true);
 
       await apiService.playMusicList(
-        deviceId: deviceId,
-        playlistName: playlistName,
-        musicName: specificMusic,
+        did: deviceId,
+        listName: playlistName,
+        musicName: specificMusic ?? '',
       );
 
       state = state.copyWith(isLoading: false);
