@@ -91,17 +91,19 @@ class JSProxyNotifier extends StateNotifier<JSProxyState> {
   Future<void> _autoLoadSelectedScript() async {
     try {
       final settings = _ref.read(sourceSettingsProvider);
-      print('[JSProxyProvider] 📋 检查自动加载条件: primarySource=${settings.primarySource}');
-      
+      print(
+        '[JSProxyProvider] 📋 检查自动加载条件: primarySource=${settings.primarySource}',
+      );
+
       if (settings.primarySource == 'js_external') {
         final scripts = _ref.read(jsScriptManagerProvider);
         final manager = _ref.read(jsScriptManagerProvider.notifier);
         final selected = manager.selectedScript;
-        
+
         print('[JSProxyProvider] 📋 脚本列表数量: ${scripts.length}');
         print('[JSProxyProvider] 📋 当前选中ID: ${manager.selectedScriptId}');
         print('[JSProxyProvider] 📋 选中脚本: ${selected?.name ?? 'null'}');
-        
+
         if (selected != null) {
           print('[JSProxyProvider] 🚀 自动加载已选脚本: ${selected.name}');
           final success = await loadScriptByScript(selected);

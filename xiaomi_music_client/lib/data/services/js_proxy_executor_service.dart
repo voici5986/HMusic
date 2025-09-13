@@ -369,7 +369,11 @@ class JSProxyExecutorService {
             return {
               hasHandlers: Object.keys(globalThis._lxHandlers || {}).length > 0,
               hasMusicSources: Object.keys(globalThis._musicSources || {}).length > 0,
-              handlers: Object.keys(globalThis._lxHandlers || {})
+              handlers: Object.keys(globalThis._lxHandlers || {}),
+              hasLxExport: typeof globalThis.lx !== 'undefined',
+              hasScriptManifest: typeof scriptManifest !== 'undefined',
+              hasGetMusicUrl: typeof getMusicUrl !== 'undefined',
+              globalKeys: Object.keys(globalThis).filter(k => !k.startsWith('_')).slice(0, 10)
             };
           } catch (e) {
             return { error: e.toString() };
@@ -378,6 +382,48 @@ class JSProxyExecutorService {
       ''');
 
       print('[JSProxy] 🔍 脚本加载检查结果: ${checkResult.stringResult}');
+
+      // 尝试手动触发脚本初始化或查找音源定义
+      try {
+        final initResult = _runtime!.evaluate('''
+          (function() {
+            try {
+              // 查找可能的音源定义
+              const possibleSources = {};
+              
+              // 检查是否有 scriptManifest
+              if (typeof scriptManifest !== 'undefined' && scriptManifest.supportedPlatforms) {
+                scriptManifest.supportedPlatforms.forEach(p => {
+                  possibleSources[p] = { name: p, supported: true };
+                });
+              }
+              
+              // 检查常见的平台标识
+              const commonPlatforms = ['tx', 'wy', 'kg', 'kw', 'qq', 'netease', 'kugou', 'kuwo'];
+              commonPlatforms.forEach(p => {
+                if (typeof globalThis[p + 'GetMusicUrl'] === 'function' || 
+                    typeof globalThis['get' + p.toUpperCase() + 'Url'] === 'function') {
+                  possibleSources[p] = { name: p, supported: true };
+                }
+              });
+              
+              // 如果找到音源，存储到 _musicSources
+              if (Object.keys(possibleSources).length > 0) {
+                globalThis._musicSources = possibleSources;
+                return { success: true, sources: possibleSources };
+              }
+              
+              return { success: false, message: 'No sources detected' };
+            } catch (e) {
+              return { error: e.toString() };
+            }
+          })()
+        ''');
+        
+        print('[JSProxy] 🔍 手动初始化结果: ${initResult.stringResult}');
+      } catch (e) {
+        print('[JSProxy] ⚠️ 手动初始化失败: $e');
+      }
 
       if (checkResult.stringResult.contains('error')) {
         print('[JSProxy] ❌ 脚本加载失败');
