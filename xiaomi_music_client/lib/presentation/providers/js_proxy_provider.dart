@@ -219,6 +219,23 @@ class JSProxyNotifier extends StateNotifier<JSProxyState> {
     }
 
     // 检查是否支持该音源
+    print('[JSProxyProvider] 🔍 当前状态检查:');
+    print('[JSProxyProvider] 🔍 isInitialized: ${state.isInitialized}');
+    print('[JSProxyProvider] 🔍 currentScript: ${state.currentScript}');
+    print('[JSProxyProvider] 🔍 supportedSources count: ${state.supportedSources.length}');
+    print('[JSProxyProvider] 🔍 supportedSources keys: ${state.supportedSources.keys.join(', ')}');
+    
+    // 尝试重新获取音源（以防状态不同步）
+    if (state.supportedSources.isEmpty && state.isInitialized) {
+      print('[JSProxyProvider] 🔄 音源列表为空，尝试重新获取...');
+      final freshSources = _service.getSupportedSources();
+      print('[JSProxyProvider] 🔄 重新获取的音源: ${freshSources.keys.join(', ')}');
+      if (freshSources.isNotEmpty) {
+        state = state.copyWith(supportedSources: freshSources);
+        print('[JSProxyProvider] 🔄 已更新状态中的音源列表');
+      }
+    }
+    
     if (!state.supportedSources.containsKey(source)) {
       print('[JSProxyProvider] ⚠️ 不支持的音源: $source');
       print(
