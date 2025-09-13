@@ -368,6 +368,9 @@ class JSProxyExecutorService {
     try {
       print('[JSProxy] 📜 开始加载JS脚本...');
 
+      // 保存脚本内容供检测使用
+      _runtime!.evaluate('globalThis._currentScriptContent = ${jsonEncode(scriptContent)};');
+      
       // 执行JS脚本
       _runtime!.evaluate(scriptContent);
       _currentScript = scriptContent;
@@ -411,14 +414,50 @@ class JSProxyExecutorService {
                 });
               }
               
-              // 检查常见的平台标识
+              // 检查常见的平台标识和函数
               const commonPlatforms = ['tx', 'wy', 'kg', 'kw', 'qq', 'netease', 'kugou', 'kuwo'];
+              const functionPatterns = [
+                p => p + 'GetMusicUrl',
+                p => 'get' + p.toUpperCase() + 'Url', 
+                p => p + '_getMusicUrl',
+                p => p + 'Music',
+                p => 'handle' + p.toUpperCase(),
+                p => p.toUpperCase() + '_MUSIC_URL'
+              ];
+              
               commonPlatforms.forEach(p => {
-                if (typeof globalThis[p + 'GetMusicUrl'] === 'function' || 
-                    typeof globalThis['get' + p.toUpperCase() + 'Url'] === 'function') {
+                // 检查各种函数命名模式
+                const hasFunction = functionPatterns.some(pattern => {
+                  const funcName = pattern(p);
+                  return typeof globalThis[funcName] === 'function';
+                });
+                
+                if (hasFunction) {
                   possibleSources[p] = { name: p, supported: true };
                 }
               });
+              
+              // 检查是否有通用的处理函数
+              if (typeof getMusicUrl === 'function' || typeof handleGetMusicUrl === 'function') {
+                // 如果有通用函数，假设支持所有常见平台
+                commonPlatforms.forEach(p => {
+                  possibleSources[p] = { name: p, supported: true };
+                });
+              }
+              
+              // 检查脚本头部注释中的支持信息
+              if (typeof globalThis._currentScriptContent === 'string') {
+                const scriptContent = globalThis._currentScriptContent;
+                const supportedMatch = scriptContent.match(/@supported\\s*[:|=]\\s*([\\w,\\s]+)/i);
+                if (supportedMatch) {
+                  const supportedList = supportedMatch[1].split(',').map(s => s.trim());
+                  supportedList.forEach(platform => {
+                    if (platform && commonPlatforms.includes(platform)) {
+                      possibleSources[platform] = { name: platform, supported: true };
+                    }
+                  });
+                }
+              }
               
               // 如果找到音源，存储到 _musicSources
               if (Object.keys(possibleSources).length > 0) {
