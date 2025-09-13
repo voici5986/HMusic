@@ -152,6 +152,9 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
             page: 1,
           ).timeout(const Duration(seconds: 15));
           sourceUsed = 'js_builtin';
+          if (parsed.isEmpty) {
+            lastError = '原生搜索无结果 (策略=${settings.jsSearchStrategy})';
+          }
         } catch (e) {
           lastError = 'JS流程搜索失败: $e';
           print('[XMC] ❌ JS流程搜索失败: $e');
@@ -365,7 +368,8 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
       final settings = ref.read(sourceSettingsProvider);
 
       // 使用与首次搜索相同的音源策略，确保一致性
-      final sourceUsed = state.sourceApiUsed ??
+      final sourceUsed =
+          state.sourceApiUsed ??
           (settings.primarySource == 'js_external' ? 'js_builtin' : 'unified');
       List<OnlineMusicResult> pageResults = [];
       String? loadMoreError;
