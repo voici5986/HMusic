@@ -916,8 +916,11 @@ class EnhancedJSProxyExecutorService {
       // 仅当顶层存在 error 字段时判定失败，避免因 handler 源码中的 console.error 误判
       bool hasTopLevelError = false;
       try {
-        final Map<String, dynamic> parsed = jsonDecode(checkResult.stringResult);
-        hasTopLevelError = parsed.containsKey('error') && parsed['error'] != null;
+        final Map<String, dynamic> parsed = jsonDecode(
+          checkResult.stringResult,
+        );
+        hasTopLevelError =
+            parsed.containsKey('error') && parsed['error'] != null;
       } catch (_) {
         // 如果解析失败，不据此判失败
         hasTopLevelError = false;
@@ -1085,6 +1088,13 @@ class EnhancedJSProxyExecutorService {
             
             if (result && typeof result.then === 'function') {
               console.log('[EnhancedJSProxy] 检测到Promise，开始等待...');
+              try {
+                result.then(function(v){
+                  try { globalThis._promiseResult = v; globalThis._promiseComplete = true; } catch(e) {}
+                }).catch(function(err){
+                  try { globalThis._promiseError = (err && (err.message || err.toString())) || 'Unknown error'; globalThis._promiseComplete = true; } catch(e) {}
+                });
+              } catch (e) { console.log('[EnhancedJSProxy] 绑定Promise回调失败:', e && e.message); }
               return JSON.stringify({ success: true, isPromise: true });
             } else if (result) {
               console.log('[EnhancedJSProxy] 同步结果:', result);
