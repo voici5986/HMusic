@@ -215,9 +215,9 @@ class EnhancedJSProxyExecutorService {
           globalThis._eventListeners[eventName].push(handler);
         },
         
-        // 事件发送
+        // 事件发送（发送到Flutter）
         send: function(eventName, data) {
-          console.log('[LXEnv] 发送事件:', eventName, data);
+          console.log('[LXEnv] 发送事件到Flutter:', eventName, data);
           const eventData = { event: eventName, data: data };
           globalThis._flutterEventSender(JSON.stringify(eventData));
           return Promise.resolve(data);
@@ -317,6 +317,31 @@ class EnhancedJSProxyExecutorService {
       window.utils = globalThis.lx.utils;
       window.env = globalThis.lx.env;
       window.version = globalThis.lx.version;
+      
+      // 内部事件分发器：分发事件到脚本内已注册的处理器
+      globalThis._dispatchEventToScript = function(eventName, data) {
+        try {
+          console.log('[LXEnv] 分发事件到脚本:', eventName, data);
+          const handlers = globalThis._lxHandlers && globalThis._lxHandlers[eventName]
+            ? (Array.isArray(globalThis._lxHandlers[eventName]) ? globalThis._lxHandlers[eventName] : [globalThis._lxHandlers[eventName]])
+            : [];
+          let lastResult = null;
+          for (const handler of handlers) {
+            if (typeof handler === 'function') {
+              try {
+                const r = handler(data);
+                lastResult = r !== undefined ? r : lastResult;
+              } catch (e) {
+                console.warn('[LXEnv] 分发事件处理器执行出错:', e);
+              }
+            }
+          }
+          return lastResult;
+        } catch (e) {
+          console.warn('[LXEnv] 分发事件出错:', e);
+          return null;
+        }
+      };
       
       // 模拟document对象
       if (typeof document === 'undefined') {
@@ -701,6 +726,11 @@ class EnhancedJSProxyExecutorService {
       _runtime!.evaluate(scriptContent);
       _currentScript = scriptContent;
 
+      // 立即触发一次 inited 到脚本（部分官方脚本在收到 inited 后注册处理器）
+      try {
+        _runtime!.evaluate("typeof _dispatchEventToScript === 'function' && _dispatchEventToScript('inited', { status: true });");
+      } catch (_) {}
+
       // 立即检查脚本执行后的状态
       final immediateCheck = _runtime!.evaluate('''
         JSON.stringify({
@@ -830,15 +860,13 @@ class EnhancedJSProxyExecutorService {
                   if (result) break;
                 }
               }
-            } else {
-              console.log('[EnhancedJSProxy] 没有找到已注册的request事件处理器');
             }
             
-            // 方式2: 直接调用lx.emit（备用）
-            if (!result && typeof lx !== 'undefined' && lx.emit) {
-              console.log('[EnhancedJSProxy] 尝试调用 lx.emit');
-              result = lx.emit(lx.EVENT_NAMES.request, request);
-              console.log('[EnhancedJSProxy] lx.emit 返回:', result);
+            // 方式2: 使用内部分发器
+            if (!result && typeof _dispatchEventToScript === 'function') {
+              console.log('[EnhancedJSProxy] 尝试通过内部分发器分发 request');
+              result = _dispatchEventToScript('request', request);
+              console.log('[EnhancedJSProxy] 内部分发器返回:', result);
             }
             
             // 方式3: 查找专用函数 (多种命名模式)
