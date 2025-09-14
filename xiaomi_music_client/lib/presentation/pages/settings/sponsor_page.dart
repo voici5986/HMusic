@@ -284,15 +284,15 @@ class SponsorPage extends StatelessWidget {
       builder:
           (context) => AlertDialog(
             title: const Text('关注公众号'),
-            content: const Text(
-              '感谢您的关注！\n\n您可以关注我们的微信公众号，获取：\n\n• 应用使用教程\n• 最新功能介绍\n• 问题解答和技巧\n• 开发进展动态\n\n公众号名称：【请替换为您的公众号名称】',
-            ),
+             content: const Text(
+               '感谢您的关注！\n\n您可以关注我们的微信公众号，获取：\n\n• 应用使用教程\n• 最新功能介绍\n• 问题解答和技巧\n• 开发进展动态\n\n公众号名称：老婆饼里没有饼',
+             ),
             actions: [
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
                   // 复制公众号名称
-                  Clipboard.setData(const ClipboardData(text: '【请替换为您的公众号名称】'));
+                   Clipboard.setData(const ClipboardData(text: '老婆饼里没有饼'));
                   ScaffoldMessenger.of(
                     context,
                   ).showSnackBar(const SnackBar(content: Text('公众号名称已复制到剪贴板')));
@@ -315,18 +315,18 @@ class SponsorPage extends StatelessWidget {
           (context) => AlertDialog(
             title: const Text('分享应用'),
             content: const Text(
-              '感谢您愿意推荐小爱音乐盒！\n\n您可以将应用分享给朋友，或在社交媒体上推荐。每一次分享都是对开发者的支持！',
+              '感谢您愿意推荐小爱音乐盒！\n\n您可以将应用分享给朋友，或在社交媒体上推荐。每一次分享都是对开发者的支持！\n\n也欢迎关注我们的公众号"老婆饼里没有饼"获取更多内容！',
             ),
             actions: [
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
                   // 复制分享文本
-                  Clipboard.setData(
-                    const ClipboardData(
-                      text: '推荐一个好用的小爱音箱音乐控制应用：小爱音乐盒！功能强大，完全免费 🎵',
-                    ),
-                  );
+                   Clipboard.setData(
+                     const ClipboardData(
+                       text: '推荐一个好用的小爱音箱音乐控制应用：小爱音乐盒！功能强大，完全免费 🎵\n\n想了解更多可以关注公众号"老婆饼里没有饼"',
+                     ),
+                   );
                   ScaffoldMessenger.of(
                     context,
                   ).showSnackBar(const SnackBar(content: Text('分享文案已复制到剪贴板')));
@@ -363,50 +363,58 @@ class SponsorPage extends StatelessWidget {
 
   Widget _buildQRCodeImage(ColorScheme colorScheme) {
     // 尝试加载赞赏码图片
-    return Image.asset(
-      'assets/images/sponsor_qr_code.png',
+    return Container(
       width: 200,
       height: 200,
-      fit: BoxFit.contain,
-      errorBuilder: (context, error, stackTrace) {
-        // 图片加载失败时显示占位符
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: colorScheme.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.qr_code_2_rounded,
-                size: 60,
-                color: colorScheme.primary.withOpacity(0.7),
-              ),
+      child: Image.asset(
+        'assets/images/sponsor_qr_code.png',
+        width: 200,
+        height: 200,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          // 图片加载失败时显示占位符
+          return Container(
+            width: 200,
+            height: 200,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.qr_code_2_rounded,
+                    size: 50,
+                    color: colorScheme.primary.withOpacity(0.7),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '微信赞赏码',
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.8),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '请添加图片到\nassets/images/',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.6),
+                    fontSize: 10,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            Text(
-              '微信赞赏码',
-              style: TextStyle(
-                color: colorScheme.onSurfaceVariant.withOpacity(0.8),
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '请将赞赏码图片添加到\nassets/images/sponsor_qr_code.png',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: colorScheme.onSurfaceVariant.withOpacity(0.6),
-                fontSize: 12,
-              ),
-            ),
-          ],
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
