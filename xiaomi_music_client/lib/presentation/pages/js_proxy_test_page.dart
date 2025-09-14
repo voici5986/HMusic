@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
+import 'package:file_picker/file_picker.dart';
 import '../providers/js_proxy_provider.dart';
 
 /// JS代理执行器测试页面
@@ -283,9 +284,7 @@ send(EVENT_NAMES.inited, { status: true, openDevTools: DEV_ENABLE, sources: musi
           followRedirects: true,
           validateStatus: (code) => code != null && code >= 200 && code < 400,
           responseType: ResponseType.plain,
-          headers: const {
-            'Accept': 'text/plain, application/javascript, */*',
-          },
+          headers: const {'Accept': 'text/plain, application/javascript, */*'},
         ),
       );
 
@@ -314,6 +313,62 @@ send(EVENT_NAMES.inited, { status: true, openDevTools: DEV_ENABLE, sources: musi
     } catch (e) {
       setState(() {
         _testResult = '❌ 从链接导入失败: $e';
+      });
+    } finally {
+      setState(() {
+        _isFetchingUrl = false;
+      });
+    }
+  }
+
+  Future<void> _importScriptFromLocal({bool loadAfterImport = false}) async {
+    try {
+      setState(() {
+        _isFetchingUrl = true;
+        _testResult = '📁 正在选择本地脚本文件...';
+      });
+
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['js', 'txt'],
+        withData: true,
+      );
+
+      if (result == null || result.files.isEmpty) {
+        setState(() {
+          _testResult = '⚠️ 已取消选择文件';
+        });
+        return;
+      }
+
+      final file = result.files.first;
+      final content = file.bytes != null ? String.fromCharCodes(file.bytes!) : '';
+      if (content.isEmpty) {
+        setState(() {
+          _testResult = '❌ 读取文件失败或内容为空';
+        });
+        return;
+      }
+
+      _scriptController.text = content;
+
+      if (loadAfterImport) {
+        final jsProxy = ref.read(jsProxyProvider.notifier);
+        final success = await jsProxy.loadScript(
+          content,
+          scriptName: file.name.isNotEmpty ? file.name : '本地脚本',
+        );
+        setState(() {
+          _testResult = success ? '✅ 已导入并加载脚本' : '❌ 导入成功但加载失败';
+        });
+      } else {
+        setState(() {
+          _testResult = '✅ 已从本地文件导入脚本内容（未加载）';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _testResult = '❌ 从本地导入失败: $e';
       });
     } finally {
       setState(() {
@@ -414,7 +469,8 @@ send(EVENT_NAMES.inited, { status: true, openDevTools: DEV_ENABLE, sources: musi
                       controller: _scriptUrlController,
                       decoration: const InputDecoration(
                         labelText: '脚本链接（URL）',
-                        hintText: '例如：https://raw.githubusercontent.com/xxx/script.js',
+                        hintText:
+                            '例如：https://raw.githubusercontent.com/xxx/script.js',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -422,17 +478,43 @@ send(EVENT_NAMES.inited, { status: true, openDevTools: DEV_ENABLE, sources: musi
                     Row(
                       children: [
                         ElevatedButton(
-                          onPressed: (jsProxyState.isLoading || _isFetchingUrl)
-                              ? null
-                              : () => _importScriptFromUrl(loadAfterImport: false),
+                          onPressed:
+                              (jsProxyState.isLoading || _isFetchingUrl)
+                                  ? null
+                                  : () => _importScriptFromUrl(
+                                    loadAfterImport: false,
+                                  ),
                           child: Text(_isFetchingUrl ? '下载中...' : '从链接导入'),
                         ),
                         const SizedBox(width: 8),
                         ElevatedButton(
-                          onPressed: (jsProxyState.isLoading || _isFetchingUrl)
-                              ? null
-                              : () => _importScriptFromUrl(loadAfterImport: true),
+                          onPressed:
+                              (jsProxyState.isLoading || _isFetchingUrl)
+                                  ? null
+                                  : () => _importScriptFromUrl(
+                                    loadAfterImport: true,
+                                  ),
                           child: Text(_isFetchingUrl ? '下载中...' : '导入并加载'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed:
+                              (jsProxyState.isLoading || _isFetchingUrl)
+                                  ? null
+                                  : () => _importScriptFromLocal(
+                                    loadAfterImport: false,
+                                  ),
+                          child: const Text('从本地导入'),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed:
+                              (jsProxyState.isLoading || _isFetchingUrl)
+                                  ? null
+                                  : () => _importScriptFromLocal(
+                                    loadAfterImport: true,
+                                  ),
+                          child: const Text('本地导入并加载'),
                         ),
                       ],
                     ),
