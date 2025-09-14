@@ -8,6 +8,7 @@ import 'presentation/pages/settings/ssh_settings_page.dart';
 import 'presentation/pages/settings/server_settings_page.dart';
 import 'presentation/pages/settings/source_settings_page.dart';
 import 'presentation/pages/settings/tts_settings_page.dart';
+import 'presentation/pages/settings/sponsor_page.dart';
 import 'presentation/pages/now_playing_page.dart';
 import 'presentation/pages/js_proxy_test_page.dart';
 
@@ -47,6 +48,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/settings/tts',
         name: 'tts_settings',
         builder: (context, state) => const TtsSettingsPage(),
+      ),
+      GoRoute(
+        path: '/settings/sponsor',
+        name: 'sponsor',
+        builder: (context, state) => const SponsorPage(),
       ),
       GoRoute(
         path: '/now-playing',

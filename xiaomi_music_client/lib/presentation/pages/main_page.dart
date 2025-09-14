@@ -217,6 +217,9 @@ class _MainPageState extends ConsumerState<MainPage> {
                   case 'tts_settings':
                     context.push('/settings/tts');
                     break;
+                  case 'sponsor':
+                    context.push('/settings/sponsor');
+                    break;
                   case 'js_proxy_test':
                     context.push('/js-proxy-test');
                     break;
@@ -341,6 +344,23 @@ class _MainPageState extends ConsumerState<MainPage> {
                           const SizedBox(width: 12),
                           Text(
                             'SCP 上传设置',
+                            style: TextStyle(color: onSurface.withOpacity(0.9)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'sponsor',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.favorite_rounded,
+                            color: Colors.red.withOpacity(0.8),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            '赞赏支持',
                             style: TextStyle(color: onSurface.withOpacity(0.9)),
                           ),
                         ],
