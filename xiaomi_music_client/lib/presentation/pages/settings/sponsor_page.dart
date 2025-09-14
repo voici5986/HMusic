@@ -281,86 +281,91 @@ class SponsorPage extends StatelessWidget {
   void _showWechatOfficialDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('关注公众号'),
-        content: SizedBox(
-          width: 300,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                '感谢您的关注！\n\n扫描下方二维码关注我们的微信公众号：',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              // 公众号二维码
-              Container(
-                width: 180,
-                height: 180,
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('关注公众号'),
+            content: SizedBox(
+              width: 300,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '感谢您的关注！\n\n扫描下方二维码关注我们的微信公众号：',
+                    textAlign: TextAlign.center,
                   ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.asset(
-                    'assets/images/wxgzh.png',
+                  const SizedBox(height: 16),
+                  // 公众号二维码
+                  Container(
                     width: 180,
                     height: 180,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.outline.withOpacity(0.3),
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.asset(
+                        'assets/images/wxgzh.jpg',
                         width: 180,
                         height: 180,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.article_rounded,
-                              size: 60,
-                              color: Theme.of(context).colorScheme.primary.withOpacity(0.7),
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            width: 180,
+                            height: 180,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.article_rounded,
+                                  size: 60,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.primary.withOpacity(0.7),
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  '公众号二维码',
+                                  style: TextStyle(fontSize: 14),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              '公众号二维码',
-                              style: TextStyle(fontSize: 14),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+                          );
+                        },
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '公众号名称：老婆饼里没有饼\n\n获取应用教程、最新功能介绍等内容',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              const Text(
-                '公众号名称：老婆饼里没有饼\n\n获取应用教程、最新功能介绍等内容',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  // 复制公众号名称
+                  Clipboard.setData(const ClipboardData(text: '老婆饼里没有饼'));
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('公众号名称已复制到剪贴板')));
+                },
+                child: const Text('复制公众号名称'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('好的'),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              // 复制公众号名称
-              Clipboard.setData(const ClipboardData(text: '老婆饼里没有饼'));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('公众号名称已复制到剪贴板')),
-              );
-            },
-            child: const Text('复制公众号名称'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('好的'),
-          ),
-        ],
-      ),
     );
   }
 
