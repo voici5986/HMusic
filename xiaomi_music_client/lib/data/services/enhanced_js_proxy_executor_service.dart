@@ -837,19 +837,32 @@ class EnhancedJSProxyExecutorService {
                     const info = request && request.info;
                     const musicInfo = info && info.musicInfo;
                     const quality = info && info.type;
-                    // 1) 优先通用函数（尝试多种参数签名）
-                    if (!result && typeof getMusicUrl === 'function') {
-                      try { result = getMusicUrl(info); } catch(_) {}
-                      if (!result) { try { result = getMusicUrl(src, musicInfo, quality); } catch(_) {}
-                      if (!result) { try { result = getMusicUrl(musicInfo, quality); } catch(_) {} }
+                    
+                    // 1) 严格优先：你的标准签名 (source, musicInfo, quality)
+                    if (typeof handleGetMusicUrl === 'function') {
+                      try { result = handleGetMusicUrl(src, musicInfo, quality); } catch(_) {}
                     }
-                    if (!result && typeof handleGetMusicUrl === 'function') {
-                      try { result = handleGetMusicUrl(info); } catch(_) {}
-                      if (!result) { try { result = handleGetMusicUrl(src, musicInfo, quality); } catch(_) {}
-                      if (!result) { try { result = handleGetMusicUrl(musicInfo, quality); } catch(_) {} }
+                    if (!result && typeof getMusicUrl === 'function') {
+                      try { result = getMusicUrl(src, musicInfo, quality); } catch(_) {}
                     }
                     
-                    // 2) 平台特定函数名模式
+                    // 2) 其次：常见双参 (musicInfo, quality)
+                    if (!result && typeof handleGetMusicUrl === 'function') {
+                      try { result = handleGetMusicUrl(musicInfo, quality); } catch(_) {}
+                    }
+                    if (!result && typeof getMusicUrl === 'function') {
+                      try { result = getMusicUrl(musicInfo, quality); } catch(_) {}
+                    }
+                    
+                    // 3) 最后再尝试单参 info（旧实现）
+                    if (!result && typeof handleGetMusicUrl === 'function') {
+                      try { result = handleGetMusicUrl(info); } catch(_) {}
+                    }
+                    if (!result && typeof getMusicUrl === 'function') {
+                      try { result = getMusicUrl(info); } catch(_) {}
+                    }
+                    
+                    // 4) 平台特定函数名模式
                     if (!result) {
                       const names = [
                         request.source + 'GetMusicUrl',
@@ -861,36 +874,41 @@ class EnhancedJSProxyExecutorService {
                       ];
                       for (const n of names) {
                         if (typeof globalThis[n] === 'function') { 
-                          try { result = globalThis[n](info) } catch(_) {}
-                          if (!result) { try { result = globalThis[n](musicInfo, quality) } catch(_) {}
-                          if (!result) { try { result = globalThis[n](src, musicInfo, quality) } catch(_) {} }
-                          if (result) break; 
+                          let r = null;
+                          try { r = globalThis[n](src, musicInfo, quality); } catch(_) {}
+                          if (!r) { try { r = globalThis[n](musicInfo, quality); } catch(_) {} }
+                          if (!r) { try { r = globalThis[n](info); } catch(_) {} }
+                          if (r) { result = r; break; }
                         }
                       }
                     }
                     
-                    // 3) apis 对象风格
+                    // 5) 对象风格
                     if (!result && typeof apis === 'object' && apis && apis[request.source] && typeof apis[request.source].musicUrl === 'function') {
-                      const q = quality;
-                      const mi = musicInfo;
-                      try { result = apis[request.source].musicUrl(mi, q); } catch(_) {}
-                      if (!result) { try { result = apis[request.source].musicUrl(info); } catch(_) {} }
+                      const q = quality; const mi = musicInfo;
+                      let r = null; try { r = apis[request.source].musicUrl(mi, q); } catch(_) {}
+                      if (!r) { try { r = apis[request.source].musicUrl(info); } catch(_) {} }
+                      if (r) result = r;
                     }
-                    
-                    // 4) sources/handlers 对象风格
                     if (!result && typeof sources === 'object' && sources && sources[request.source] && typeof sources[request.source].musicUrl === 'function') {
-                      try { result = sources[request.source].musicUrl(info); } catch(_) {}
-                      if (!result) { try { result = sources[request.source].musicUrl(musicInfo, quality); } catch(_) {} }
+                      let r = null; try { r = sources[request.source].musicUrl(src, musicInfo, quality); } catch(_) {}
+                      if (!r) { try { r = sources[request.source].musicUrl(musicInfo, quality); } catch(_) {} }
+                      if (!r) { try { r = sources[request.source].musicUrl(info); } catch(_) {} }
+                      if (r) result = r;
                     }
                     
-                    // 5) 尝试任何包含关键字的函数
+                    // 6) 兜底扫描
                     if (!result) {
                       const allFunctions = Object.getOwnPropertyNames(globalThis).filter(name => 
                         typeof globalThis[name] === 'function' &&
                         (name.toLowerCase().includes('music') || name.toLowerCase().includes('url') || name.toLowerCase().includes(request.source.toLowerCase()))
                       );
                       for (const fn of allFunctions) {
-                        try { let r = globalThis[fn](info || request); if (!r) r = globalThis[fn](musicInfo, quality); if (!r) r = globalThis[fn](src, musicInfo, quality); if (r) { result = r; break; } } catch(e) {}
+                        let r = null;
+                        try { r = globalThis[fn](src, musicInfo, quality); } catch(_) {}
+                        if (!r) { try { r = globalThis[fn](musicInfo, quality); } catch(_) {} }
+                        if (!r) { try { r = globalThis[fn](info || request); } catch(_) {} }
+                        if (r) { result = r; break; }
                       }
                     }
                     
