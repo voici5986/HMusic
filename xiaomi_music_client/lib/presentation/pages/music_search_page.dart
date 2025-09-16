@@ -599,17 +599,39 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
               musicAuthor: item.author,
             );
           } else {
-            final apiUrl =
-                'https://lxmusicapi.onrender.com/url/$mapped/$id/320k';
-            final headers = {'X-Request-Key': 'share-v2'};
-            print('[XMC] 🎵 [Play] 解析失败，回退API链接: $apiUrl');
-            await apiService.playOnlineMusic(
-              did: selectedDeviceId,
-              musicUrl: apiUrl,
-              musicTitle: item.title,
-              musicAuthor: item.author,
-              headers: headers,
-            );
+            // 公开版本：使用统一API作为回退
+            print('[XMC] 🎵 [Play] JS解析失败，回退到统一API');
+            try {
+              final unifiedService = ref.read(unifiedApiServiceProvider);
+              final unifiedUrl = await unifiedService.getMusicUrl(
+                songId: id,
+                platform: platform,
+                quality: '320k',
+              );
+              
+              if (unifiedUrl != null && unifiedUrl.isNotEmpty) {
+                print('[XMC] ✅ [Play] 统一API回退成功: $unifiedUrl');
+                await apiService.playOnlineMusic(
+                  did: selectedDeviceId,
+                  musicUrl: unifiedUrl,
+                  musicTitle: item.title,
+                  musicAuthor: item.author,
+                );
+              } else {
+                throw Exception('统一API也无法解析该歌曲');
+              }
+            } catch (e) {
+              print('[XMC] ❌ [Play] 统一API回退失败: $e');
+              if (mounted) {
+                AppSnackBar.show(
+                  context,
+                  SnackBar(
+                    content: Text('播放失败: 无法获取音乐链接'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            }
           }
 
           print('[XMC] ✅ [Play] JS源播放请求成功');

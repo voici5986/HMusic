@@ -165,13 +165,13 @@ class SourceSettingsNotifier extends StateNotifier<SourceSettings> {
       // 公开版本：清理所有可能的xiaoqiu.js遗留配置
       String? finalUrl = scriptUrl;
       bool needsCleanup = false;
-      
+
       if (finalUrl != null && finalUrl.contains('xiaoqiu.js')) {
         print('[XMC] 🧹 [SourceSettings] 检测到遗留的xiaoqiu.js配置，自动清理');
         finalUrl = '';
         needsCleanup = true;
       }
-      
+
       // 只有检测到xiaoqiu.js时才重置primarySource，避免覆盖用户的JS设置
       if (needsCleanup) {
         // 清理遗留配置
@@ -180,7 +180,7 @@ class SourceSettingsNotifier extends StateNotifier<SourceSettings> {
         await prefs.setString(_kScriptPreset, 'custom');
         await prefs.setString(_kPrimarySource, 'unified');
       }
-      
+
       // 确保公开版本的默认设置
       finalUrl = finalUrl ?? state.scriptUrl;
 
@@ -202,7 +202,8 @@ class SourceSettingsNotifier extends StateNotifier<SourceSettings> {
         ttsTestText: ttsTestText ?? state.ttsTestText,
         useBuiltinScript: useBuiltinScript ?? state.useBuiltinScript,
         // 只有在清理遗留配置时才强制设为unified，否则保持用户设置
-        primarySource: needsCleanup ? 'unified' : (primarySource ?? state.primarySource),
+        primarySource:
+            needsCleanup ? 'unified' : (primarySource ?? state.primarySource),
         scriptPreset: scriptPreset ?? state.scriptPreset,
         localScriptPath: localScriptPath ?? state.localScriptPath,
         jsSearchStrategy: jsSearchStrategy ?? state.jsSearchStrategy,
