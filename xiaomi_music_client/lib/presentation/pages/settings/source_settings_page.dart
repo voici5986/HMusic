@@ -551,7 +551,7 @@ class _SourceSettingsPageState extends ConsumerState<SourceSettingsPage> {
                 : (selectedScript?.source == JsScriptSource.builtin
                     ? selectedScript?.content ?? ''
                     : ''),
-        scriptPreset: selectedScript?.id ?? 'builtin_xiaoqiu',
+        scriptPreset: selectedScript?.id ?? 'custom',
         localScriptPath:
             selectedScript?.source == JsScriptSource.localFile
                 ? selectedScript?.content ?? ''
