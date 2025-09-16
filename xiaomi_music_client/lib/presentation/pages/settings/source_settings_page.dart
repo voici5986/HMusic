@@ -32,11 +32,18 @@ class _SourceSettingsPageState extends ConsumerState<SourceSettingsPage> {
 
   void _initializeFromProvider(SourceSettings s) {
     if (_initialized) return;
+    print('[XMC] 🔧 [SourceSettingsPage] 初始化页面状态:');
+    print('  - provider.primarySource: ${s.primarySource}');
+    print('  - 当前_primary: $_primary');
+    
     _apiCtrl.text = s.unifiedApiBase;
     _platform = s.platform == 'auto' ? 'qq' : s.platform;
     _primary = s.primarySource;
     _jsSearchStrategy = s.jsSearchStrategy;
     _initialized = true;
+    
+    print('  - 设置后_primary: $_primary');
+    print('  - _initialized: $_initialized');
   }
 
   @override
@@ -59,6 +66,13 @@ class _SourceSettingsPageState extends ConsumerState<SourceSettingsPage> {
         setState(() {});
       });
     }
+    
+    // 调试：每次build时显示当前状态
+    print('[XMC] 🔧 [SourceSettingsPage] build状态:');
+    print('  - _initialized: $_initialized');
+    print('  - _primary: $_primary');
+    print('  - provider.primarySource: ${settings.primarySource}');
+    print('  - scripts.length: ${scripts.length}');
 
     final onSurface = Theme.of(context).colorScheme.onSurface;
     return Scaffold(

@@ -186,7 +186,8 @@ class SourceSettingsNotifier extends StateNotifier<SourceSettings> {
       finalUrl = finalUrl ?? state.scriptUrl;
 
       // 调试：最终的primarySource值
-      final finalPrimarySource = needsCleanup ? 'unified' : (primarySource ?? state.primarySource);
+      final finalPrimarySource =
+          needsCleanup ? 'unified' : (primarySource ?? state.primarySource);
       print('[XMC] 🔧 [SourceSettings] 最终primarySource设置:');
       print('  - needsCleanup: $needsCleanup');
       print('  - primarySource from prefs: $primarySource');
