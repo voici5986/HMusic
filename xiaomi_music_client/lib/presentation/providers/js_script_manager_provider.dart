@@ -47,14 +47,15 @@ class JsScriptManager extends StateNotifier<List<JsScript>> {
       }
 
       state = scripts;
-      
+
       // 公开版本：清理遗留的内置脚本选择
       if (selectedId == 'builtin_xiaoqiu') {
         print('[XMC] 🧹 [JsScriptManager] 检测到遗留的内置脚本选择，自动清理');
         _selectedScriptId = scripts.isNotEmpty ? scripts.first.id : null;
         await _saveScripts(); // 保存清理后的状态
       } else {
-        _selectedScriptId = selectedId ?? (scripts.isNotEmpty ? scripts.first.id : null);
+        _selectedScriptId =
+            selectedId ?? (scripts.isNotEmpty ? scripts.first.id : null);
       }
 
       print(
