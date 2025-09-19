@@ -17,6 +17,8 @@ class _SourceSettingsPageState extends ConsumerState<SourceSettingsPage> {
   late TextEditingController _apiCtrl;
   String _platform = 'qq';
   bool _initialized = false;
+  bool _userModified = false;
+  ProviderSubscription<SourceSettings>? _settingsSub;
   // _jsEnabled 已由 _primary 状态隐含控制，无需单独使用
   String _primary = 'unified'; // 'unified' | 'js_external'
   String _jsSearchStrategy =
@@ -27,52 +29,55 @@ class _SourceSettingsPageState extends ConsumerState<SourceSettingsPage> {
     super.initState();
     _apiCtrl = TextEditingController();
 
-    // Riverpod 限制：listen 不能放在 initState，这里不监听
-  }
-
-  void _initializeFromProvider(SourceSettings s) {
-    if (_initialized) return;
-    print('[XMC] 🔧 [SourceSettingsPage] 初始化页面状态:');
-    print('  - provider.primarySource: ${s.primarySource}');
-    print('  - 当前_primary: $_primary');
-    
-    _apiCtrl.text = s.unifiedApiBase;
-    _platform = s.platform == 'auto' ? 'qq' : s.platform;
-    _primary = s.primarySource;
-    _jsSearchStrategy = s.jsSearchStrategy;
-    _initialized = true;
-    
-    print('  - 设置后_primary: $_primary');
-    print('  - _initialized: $_initialized');
+    // 监听 Provider 的变化：当设置加载完成且用户未修改时，同步到本地状态
+    _settingsSub = ref.listenManual<SourceSettings>(sourceSettingsProvider, (
+      prev,
+      next,
+    ) {
+      // 仅在初始化完成后、且用户未修改的情况下，同步 Provider 的最新值
+      if (!_initialized || _userModified) return;
+      setState(() {
+        _primary = next.primarySource;
+        _platform = next.platform == 'auto' ? 'qq' : next.platform;
+        _apiCtrl.text = next.unifiedApiBase;
+        _jsSearchStrategy = next.jsSearchStrategy;
+      });
+    });
   }
 
   @override
   void dispose() {
+    _settingsSub?.close();
     _apiCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isLoaded = ref.read(sourceSettingsProvider.notifier).isLoaded;
     final settings = ref.watch(sourceSettingsProvider);
     final scripts = ref.watch(jsScriptManagerProvider);
     final scriptManager = ref.read(jsScriptManagerProvider.notifier);
     final selectedScript = scriptManager.selectedScript;
 
-    // 只在首次初始化时同步provider状态到本地控件
-    if (!_initialized) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _initializeFromProvider(settings);
-        setState(() {});
-      });
+    // 若设置尚未加载完成，显示占位，避免使用默认值误导
+    if (!isLoaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('音源设置')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
     }
-    
-    // 调试：每次build时显示当前状态
-    print('[XMC] 🔧 [SourceSettingsPage] build状态:');
-    print('  - _initialized: $_initialized');
-    print('  - _primary: $_primary');
-    print('  - provider.primarySource: ${settings.primarySource}');
-    print('  - scripts.length: ${scripts.length}');
+
+    // 🔧 简化的初始化逻辑：只在首次或设置真正变化时同步
+    if (!_initialized) {
+      _apiCtrl.text = settings.unifiedApiBase;
+      _platform = settings.platform == 'auto' ? 'qq' : settings.platform;
+      _primary = settings.primarySource;
+      _jsSearchStrategy = settings.jsSearchStrategy;
+      _initialized = true;
+
+      print('[XMC] 🔧 [SourceSettingsPage] 首次初始化完成: $_primary');
+    }
 
     final onSurface = Theme.of(context).colorScheme.onSurface;
     return Scaffold(
@@ -128,7 +133,11 @@ class _SourceSettingsPageState extends ConsumerState<SourceSettingsPage> {
               icon: Icons.cloud_outlined,
               value: 'unified',
               isSelected: _primary == 'unified',
-              onTap: () => setState(() => _primary = 'unified'),
+              onTap:
+                  () => setState(() {
+                    _primary = 'unified';
+                    _userModified = true;
+                  }),
             ),
             const SizedBox(height: 12),
             // JS外置脚本 选项
@@ -139,7 +148,11 @@ class _SourceSettingsPageState extends ConsumerState<SourceSettingsPage> {
               icon: Icons.code_outlined,
               value: 'js_external',
               isSelected: _primary == 'js_external',
-              onTap: () => setState(() => _primary = 'js_external'),
+              onTap:
+                  () => setState(() {
+                    _primary = 'js_external';
+                    _userModified = true;
+                  }),
             ),
           ],
         ),
