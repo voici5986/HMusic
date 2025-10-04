@@ -70,51 +70,76 @@ class DeviceNotifier extends StateNotifier<DeviceState> {
       state = state.copyWith(isLoading: true);
 
       final response = await apiService.getSettings(needDeviceList: true);
-
-      debugPrint('🔍 [DeviceProvider] 完整的响应数据: $response');
+      
       debugPrint('🔍 [DeviceProvider] mi_did: ${response['mi_did']}');
-
+      
+      // 🎯 优先使用 devices 字段（用户配置的设备）
+      final devicesConfig = response['devices'] as Map<String, dynamic>? ?? {};
       final deviceList = response['device_list'] as List<dynamic>? ?? [];
 
-      debugPrint('🔍 [DeviceProvider] 接收到的 device_list: $deviceList');
-      debugPrint(
-        '🔍 [DeviceProvider] device_list 是否存在: ${response.containsKey('device_list')}',
-      );
-      debugPrint('🔍 [DeviceProvider] device_list 长度: ${deviceList.length}');
+      debugPrint('🔍 [DeviceProvider] devices 配置数量: ${devicesConfig.length}');
+      debugPrint('🔍 [DeviceProvider] device_list 扫描数量: ${deviceList.length}');
 
-      // 🎯 第一步：过滤出已勾选的设备（current: true）
-      final selectedDeviceList = deviceList.where((json) {
-        final deviceData = json as Map<String, dynamic>;
-        final isCurrent = deviceData['current'] == true;
-        debugPrint('🔍 [DeviceProvider] 设备 ${deviceData['name']} (${deviceData['miotDID']}), current: $isCurrent');
-        return isCurrent;
-      }).toList();
+      List<Device> devices = [];
 
-      debugPrint('🔍 [DeviceProvider] 已勾选的设备数量: ${selectedDeviceList.length}');
+      // 🎯 方案1：优先从 devices 配置中读取（更可靠）
+      if (devicesConfig.isNotEmpty) {
+        debugPrint('🔍 [DeviceProvider] 使用 devices 配置构建设备列表');
+        devices = devicesConfig.entries.map((entry) {
+          final deviceData = entry.value as Map<String, dynamic>;
+          final did = deviceData['did']?.toString() ?? entry.key;
+          final name = deviceData['name']?.toString() ?? '未知设备';
+          final hardware = deviceData['hardware']?.toString();
+          
+          // 从 device_list 中查找对应设备的在线状态
+          bool isOnline = false;
+          String? ip;
+          for (final item in deviceList) {
+            final itemData = item as Map<String, dynamic>;
+            if (itemData['miotDID']?.toString() == did) {
+              isOnline = itemData['presence']?.toString() == 'online';
+              ip = itemData['address']?.toString();
+              break;
+            }
+          }
+          
+          debugPrint('🔍 [DeviceProvider] 设备: $name ($did), 在线: $isOnline');
+          
+          return Device(
+            id: did,
+            name: name,
+            type: hardware,
+            isOnline: isOnline,
+            ip: ip,
+          );
+        }).where((device) => device.id.isNotEmpty).toList();
+      } 
+      // 🎯 方案2：如果 devices 配置为空，尝试从 device_list 中过滤 current: true 的设备
+      else if (deviceList.isNotEmpty) {
+        debugPrint('🔍 [DeviceProvider] devices 配置为空，尝试从 device_list 中过滤');
+        final selectedDeviceList = deviceList.where((json) {
+          final deviceData = json as Map<String, dynamic>;
+          final isCurrent = deviceData['current'] == true;
+          debugPrint('🔍 [DeviceProvider] 设备 ${deviceData['name']} (${deviceData['miotDID']}), current: $isCurrent');
+          return isCurrent;
+        }).toList();
 
-      // 🎯 第二步：将已勾选的设备转换为 Device 对象
-      final devices =
-          selectedDeviceList
-              .map((json) {
-                final deviceData = json as Map<String, dynamic>;
-                final deviceID = deviceData['deviceID']?.toString() ?? '';
-                final miotDID = deviceData['miotDID']?.toString() ?? '';
-                final deviceName =
-                    deviceData['name']?.toString() ??
-                    deviceData['alias']?.toString() ??
-                    '未知设备';
+        devices = selectedDeviceList.map((json) {
+          final deviceData = json as Map<String, dynamic>;
+          final deviceID = deviceData['deviceID']?.toString() ?? '';
+          final miotDID = deviceData['miotDID']?.toString() ?? '';
+          final deviceName = deviceData['name']?.toString() ??
+              deviceData['alias']?.toString() ?? '未知设备';
 
-                return Device(
-                  id: miotDID.isNotEmpty ? miotDID : deviceID,
-                  name: deviceName,
-                  type: deviceData['hardware']?.toString(),
-                  isOnline:
-                      deviceData['presence']?.toString() == 'online',
-                  ip: deviceData['address']?.toString(),
-                );
-              })
-              .where((device) => device.id.isNotEmpty)
-              .toList();
+          return Device(
+            id: miotDID.isNotEmpty ? miotDID : deviceID,
+            name: deviceName,
+            type: deviceData['hardware']?.toString(),
+            isOnline: deviceData['presence']?.toString() == 'online',
+            ip: deviceData['address']?.toString(),
+          );
+        }).where((device) => device.id.isNotEmpty).toList();
+      }
 
       debugPrint('🔍 [DeviceProvider] 解析后的 devices 数量: ${devices.length}');
       debugPrint(
