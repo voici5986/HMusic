@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/playing_music.dart';
 import '../../data/models/online_music_result.dart';
+import '../../data/services/native_music_search_service.dart';
 import 'dio_provider.dart';
 import 'device_provider.dart';
 
@@ -123,11 +126,19 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   // 保存服务器最后返回的原始进度，用于本地预测基准
   int? _lastServerOffset;
 
+  // 🖼️ 封面图自动搜索相关
+  final _searchService = NativeMusicSearchService();
+  final Map<String, String> _coverCache = {}; // 歌曲名 -> 封面URL 的缓存
+  static const String _coverCacheKey = 'album_cover_cache';
+  static const int _maxCacheSize = 200; // 最多缓存200首歌的封面
+
   PlaybackNotifier(this.ref)
     : super(const PlaybackState(isLoading: false, hasLoaded: false)) {
     // 禁用自动初始化，避免在未登录时进行网络请求
     // 需要用户手动触发初始化
     debugPrint('PlaybackProvider: 自动初始化已禁用，等待用户手动触发');
+    // 🖼️ 异步加载封面图缓存
+    _loadCoverCache();
   }
 
   @override
@@ -290,6 +301,15 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
           _lastServerOffset = serverOffset;
           _lastUpdateTime = DateTime.now();
         }
+      }
+
+      // 🖼️ 自动搜索封面图（适用于服务端本地歌曲）
+      if (currentMusic != null &&
+          (state.albumCoverUrl == null || state.albumCoverUrl!.isEmpty)) {
+        // 异步搜索封面图，不阻塞主流程
+        _autoFetchAlbumCover(currentMusic.curMusic).catchError((e) {
+          print('🖼️ [AutoCover] 异步搜索封面失败: $e');
+        });
       }
 
       // 如果音乐正在播放，启动自动刷新进度
@@ -744,6 +764,100 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     if (coverUrl.isNotEmpty) {
       state = state.copyWith(albumCoverUrl: coverUrl);
       print('[Playback] 🖼️  封面图已更新: $coverUrl');
+    }
+  }
+
+  /// 🖼️ 从本地存储加载封面图缓存
+  Future<void> _loadCoverCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheJson = prefs.getString(_coverCacheKey);
+      if (cacheJson != null && cacheJson.isNotEmpty) {
+        final Map<String, dynamic> decoded = jsonDecode(cacheJson);
+        _coverCache.clear();
+        decoded.forEach((key, value) {
+          if (value is String) {
+            _coverCache[key] = value;
+          }
+        });
+        print('🖼️ [CoverCache] 已加载 ${_coverCache.length} 条封面缓存');
+      }
+    } catch (e) {
+      print('🖼️ [CoverCache] 加载缓存失败: $e');
+    }
+  }
+
+  /// 🖼️ 保存封面图缓存到本地存储
+  Future<void> _saveCoverCache() async {
+    try {
+      // 限制缓存大小，移除最早的条目
+      if (_coverCache.length > _maxCacheSize) {
+        final keysToRemove =
+            _coverCache.keys.take(_coverCache.length - _maxCacheSize).toList();
+        for (final key in keysToRemove) {
+          _coverCache.remove(key);
+        }
+        print('🖼️ [CoverCache] 清理缓存，当前大小: ${_coverCache.length}');
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final cacheJson = jsonEncode(_coverCache);
+      await prefs.setString(_coverCacheKey, cacheJson);
+      print('🖼️ [CoverCache] 已保存 ${_coverCache.length} 条封面缓存');
+    } catch (e) {
+      print('🖼️ [CoverCache] 保存缓存失败: $e');
+    }
+  }
+
+  /// 🖼️ 自动搜索并获取歌曲封面图（用于服务端本地歌曲）
+  Future<void> _autoFetchAlbumCover(String songName) async {
+    // 🎯 先检查缓存
+    if (_coverCache.containsKey(songName)) {
+      final cachedUrl = _coverCache[songName]!;
+      print('🖼️ [AutoCover] 从缓存加载封面: $songName');
+      updateAlbumCover(cachedUrl);
+      return;
+    }
+
+    try {
+      print('🖼️ [AutoCover] 开始自动搜索封面: $songName');
+
+      // 优先搜索QQ音乐（封面质量较好）
+      List<OnlineMusicResult> results = await _searchService.searchQQ(
+        query: songName,
+        page: 1,
+      );
+
+      // 如果QQ音乐没有结果，尝试网易云音乐
+      if (results.isEmpty) {
+        print('🖼️ [AutoCover] QQ音乐无结果，尝试网易云音乐');
+        results = await _searchService.searchNetease(query: songName, page: 1);
+      }
+
+      // 从搜索结果中提取封面图
+      if (results.isNotEmpty) {
+        final firstResult = results.first;
+        if (firstResult.picture != null && firstResult.picture!.isNotEmpty) {
+          print('🖼️ [AutoCover] 找到封面: ${firstResult.picture}');
+          print(
+            '🖼️ [AutoCover] 来源: ${firstResult.title} - ${firstResult.author}',
+          );
+
+          // 🎯 保存到缓存
+          _coverCache[songName] = firstResult.picture!;
+          _saveCoverCache(); // 异步保存，不阻塞主流程
+
+          // 更新封面图（在主线程中）
+          updateAlbumCover(firstResult.picture!);
+        } else {
+          print('🖼️ [AutoCover] 搜索结果无封面图信息');
+        }
+      } else {
+        print('🖼️ [AutoCover] 未找到搜索结果');
+      }
+    } catch (e) {
+      print('🖼️ [AutoCover] 搜索封面失败: $e');
+      // 静默失败，不影响播放
     }
   }
 
