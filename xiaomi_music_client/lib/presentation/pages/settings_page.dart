@@ -20,6 +20,25 @@ class SettingsPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 支持分组
+          _buildSettingsGroup(
+            context,
+            title: '支持',
+            children: [
+              _buildSettingsItem(
+                context: context,
+                icon: Icons.favorite_rounded,
+                title: '赞赏支持',
+                subtitle: '支持开发者继续维护',
+                onTap: () => context.push('/settings/sponsor'),
+                onSurface: onSurface,
+                iconColor: Colors.red.withOpacity(0.8),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
           // 音源设置分组
           _buildSettingsGroup(
             context,
@@ -100,25 +119,6 @@ class SettingsPage extends ConsumerWidget {
                 subtitle: '测试JavaScript代理功能',
                 onTap: () => context.push('/js-proxy-test'),
                 onSurface: onSurface,
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          // 支持分组
-          _buildSettingsGroup(
-            context,
-            title: '支持',
-            children: [
-              _buildSettingsItem(
-                context: context,
-                icon: Icons.favorite_rounded,
-                title: '赞赏支持',
-                subtitle: '支持开发者继续维护',
-                onTap: () => context.push('/settings/sponsor'),
-                onSurface: onSurface,
-                iconColor: Colors.red.withOpacity(0.8),
               ),
             ],
           ),
