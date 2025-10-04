@@ -5,7 +5,6 @@ import '../../core/constants/app_constants.dart';
 import '../providers/auth_provider.dart';
 import '../providers/device_provider.dart';
 import '../../data/models/device.dart';
-import '../widgets/app_snackbar.dart';
 import '../widgets/app_layout.dart';
 
 class ControlPanelPage extends ConsumerStatefulWidget {
@@ -36,8 +35,8 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
       vsync: this,
     );
 
-    // 延迟初始化以避免阻塞UI，只在用户已登录时自动加载设备
-    Future.delayed(const Duration(milliseconds: 500), () {
+    // 🎯 优化：立即开始加载，避免延迟造成的割裂感
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         try {
           final authState = ref.read(authProvider);
@@ -90,7 +89,7 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
               sliver: SliverList.list(
                 children: [
                   if (widget.showAppBar) const SizedBox(height: 0),
@@ -183,14 +182,9 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
       ),
       child: Column(
         children: [
-          // 🎯 只在有设备时显示设备选择器
-          if (deviceState.devices.isNotEmpty) ...[
-            _buildDeviceSelector(deviceState),
-            const SizedBox(height: 12),
-          ] else if (!deviceState.isLoading) ...[
-            _buildNoDeviceHint(),
-            const SizedBox(height: 12),
-          ],
+          // 🎯 始终显示设备区域，避免布局跳动
+          _buildDeviceArea(deviceState),
+          const SizedBox(height: 12),
           _buildAlbumArtwork(currentMusic, currentMusic?.isPlaying ?? false),
           const SizedBox(height: 12),
           _buildSongInfo(currentMusic, playbackState.hasLoaded),
@@ -201,8 +195,59 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             _buildInitialProgressBar(),
           const SizedBox(height: 8),
           _buildPlaybackControls(playbackState),
+          const SizedBox(height: 12),
+          _buildQuickActions(playbackState),
           const SizedBox(height: 8),
           _buildVolumeControl(playbackState),
+        ],
+      ),
+    );
+  }
+
+  /// 🎯 设备区域：始终显示固定高度，避免布局跳动
+  Widget _buildDeviceArea(DeviceState deviceState) {
+    if (deviceState.isLoading && deviceState.devices.isEmpty) {
+      // 加载中且没有设备：显示加载占位符
+      return _buildDeviceLoadingPlaceholder();
+    } else if (deviceState.devices.isNotEmpty) {
+      // 有设备：显示设备选择器
+      return _buildDeviceSelector(deviceState);
+    } else {
+      // 加载完成但没有设备：显示提示
+      return _buildNoDeviceHint();
+    }
+  }
+
+  /// 🎯 加载中的占位符（保持与设备选择器相同的高度）
+  Widget _buildDeviceLoadingPlaceholder() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: onSurface.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation(onSurface.withOpacity(0.6)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '正在加载设备...',
+            style: TextStyle(
+              color: onSurface.withOpacity(0.7),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -658,33 +703,16 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
               context,
             ).colorScheme.primary.withOpacity(0.2),
           ),
-          child: Stack(
-            children: [
-              Slider(
-                value: progress,
-                onChanged: AppConstants.enableSeek ? (value) {} : null,
-                onChangeEnd:
-                    AppConstants.enableSeek
-                        ? (value) {
-                          final newPos = (value * totalTime).round();
-                          ref.read(playbackProvider.notifier).seekTo(newPos);
-                        }
-                        : null,
-              ),
-              if (!AppConstants.enableSeek)
-                Positioned.fill(
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () {
-                        AppSnackBar.showText(context, '服务器未支持进度拖动');
-                      },
-                      splashColor: Colors.transparent,
-                      highlightColor: Colors.transparent,
-                    ),
-                  ),
-                ),
-            ],
+          child: Slider(
+            value: progress,
+            onChanged: AppConstants.enableSeek ? (value) {} : null,
+            onChangeEnd:
+                AppConstants.enableSeek
+                    ? (value) {
+                      final newPos = (value * totalTime).round();
+                      ref.read(playbackProvider.notifier).seekTo(newPos);
+                    }
+                    : null,
           ),
         ),
         const SizedBox(height: 4),
@@ -701,26 +729,6 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             ),
           ],
         ),
-        if (!AppConstants.enableSeek) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 14,
-                color: onSurface.withOpacity(0.5),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '服务器未支持进度拖动',
-                style: TextStyle(
-                  color: onSurface.withOpacity(0.5),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ],
       ],
     );
   }
@@ -743,37 +751,14 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
           ),
           child: Slider(value: 0, min: 0, max: 1, onChanged: null),
         ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
-              Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
-            ],
-          ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
+            Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
+          ],
         ),
-        if (!AppConstants.enableSeek) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 14,
-                color: onSurface.withOpacity(0.5),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '服务器未支持进度拖动',
-                style: TextStyle(
-                  color: onSurface.withOpacity(0.5),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ],
       ],
     );
   }
@@ -971,6 +956,111 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
           ),
         ],
       ),
+    );
+  }
+
+  /// 🎵 快捷操作按钮（播放模式切换 + 定时关机 + 加入收藏）
+  Widget _buildQuickActions(PlaybackState state) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final enabled = ref.read(deviceProvider).selectedDeviceId != null;
+    final favoriteEnabled = enabled && state.currentMusic != null;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // 播放模式切换按钮
+        IconButton(
+          icon: Icon(state.playMode.icon),
+          iconSize: 28,
+          color:
+              enabled
+                  ? Theme.of(context).colorScheme.primary
+                  : onSurface.withOpacity(0.4),
+          onPressed:
+              enabled
+                  ? () {
+                    // 循环切换到下一个播放模式
+                    final currentMode = state.playMode;
+                    final nextMode =
+                        PlayMode.values[(currentMode.index + 1) %
+                            PlayMode.values.length];
+                    ref
+                        .read(playbackProvider.notifier)
+                        .switchPlayMode(nextMode);
+                  }
+                  : null,
+          tooltip: state.playMode.displayName,
+        ),
+        const SizedBox(width: 32),
+        // 定时关机按钮（长按快速取消定时）
+        GestureDetector(
+          onLongPress:
+              enabled && state.timerMinutes > 0
+                  ? () {
+                    // 长按快速关闭定时
+                    ref.read(playbackProvider.notifier).cancelTimer();
+                  }
+                  : null,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.timer_outlined),
+                iconSize: 28,
+                color:
+                    enabled
+                        ? (state.timerMinutes > 0
+                            ? Colors.orangeAccent
+                            : onSurface)
+                        : onSurface.withOpacity(0.4),
+                onPressed:
+                    enabled
+                        ? () => ref.read(playbackProvider.notifier).setTimer()
+                        : null,
+                tooltip:
+                    state.timerMinutes > 0
+                        ? '${state.timerMinutes}分钟后关机\n长按取消定时'
+                        : '定时关机',
+              ),
+              if (state.timerMinutes > 0)
+                Positioned(
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orangeAccent,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${state.timerMinutes}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 32),
+        // 加入收藏按钮
+        IconButton(
+          icon: const Icon(Icons.favorite_border_rounded),
+          iconSize: 28,
+          color:
+              favoriteEnabled ? Colors.pinkAccent : onSurface.withOpacity(0.4),
+          onPressed:
+              favoriteEnabled
+                  ? () => ref.read(playbackProvider.notifier).addToFavorites()
+                  : null,
+          tooltip: '加入收藏',
+        ),
+      ],
     );
   }
 }

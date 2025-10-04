@@ -1,42 +1,66 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/playing_music.dart';
 import '../../data/models/online_music_result.dart';
 import 'dio_provider.dart';
 import 'device_provider.dart';
 
+// 用于区分"未传入参数"和"传入 null"
+const _undefined = Object();
+
 enum PlayMode {
-  sequence, // 顺序播放
-  loop, // 循环播放
-  random, // 随机播放
+  loop, // 全部循环
   single, // 单曲循环
+  random, // 随机播放
+  sequence, // 顺序播放
+  singlePlay, // 单曲播放
 }
 
 extension PlayModeExtension on PlayMode {
   String get displayName {
     switch (this) {
-      case PlayMode.sequence:
-        return '顺序播放';
       case PlayMode.loop:
-        return '循环播放';
-      case PlayMode.random:
-        return '随机播放';
+        return '全部循环';
       case PlayMode.single:
         return '单曲循环';
+      case PlayMode.random:
+        return '随机播放';
+      case PlayMode.sequence:
+        return '顺序播放';
+      case PlayMode.singlePlay:
+        return '单曲播放';
     }
   }
 
   String get command {
     switch (this) {
-      case PlayMode.sequence:
-        return 'sequence';
       case PlayMode.loop:
-        return 'loop';
-      case PlayMode.random:
-        return 'random';
+        return '全部循环';
       case PlayMode.single:
-        return 'single';
+        return '单曲循环';
+      case PlayMode.random:
+        return '随机播放';
+      case PlayMode.sequence:
+        return '顺序播放';
+      case PlayMode.singlePlay:
+        return '单曲播放';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case PlayMode.loop:
+        return Icons.repeat;
+      case PlayMode.single:
+        return Icons.repeat_one;
+      case PlayMode.random:
+        return Icons.shuffle;
+      case PlayMode.sequence:
+        return Icons.reorder;
+      case PlayMode.singlePlay:
+        return Icons.looks_one;
     }
   }
 }
@@ -49,15 +73,17 @@ class PlaybackState {
   final PlayMode playMode;
   final bool hasLoaded; // whether initial fetch attempted
   final String? albumCoverUrl; // ✨ 当前播放歌曲的专辑封面图 URL
+  final int timerMinutes; // ⏰ 定时关机分钟数（0 表示未设置）
 
   const PlaybackState({
     this.currentMusic,
     this.volume = 0, // Initial UI shows volume at 0 before server data arrives
     this.isLoading = false,
     this.error,
-    this.playMode = PlayMode.sequence,
+    this.playMode = PlayMode.loop, // 默认全部循环
     this.hasLoaded = false,
     this.albumCoverUrl,
+    this.timerMinutes = 0, // 默认未设置定时
   });
 
   PlaybackState copyWith({
@@ -67,7 +93,8 @@ class PlaybackState {
     String? error,
     PlayMode? playMode,
     bool? hasLoaded,
-    String? albumCoverUrl,
+    Object? albumCoverUrl = _undefined,
+    int? timerMinutes,
   }) {
     return PlaybackState(
       currentMusic: currentMusic ?? this.currentMusic,
@@ -76,7 +103,11 @@ class PlaybackState {
       error: error,
       playMode: playMode ?? this.playMode,
       hasLoaded: hasLoaded ?? this.hasLoaded,
-      albumCoverUrl: albumCoverUrl ?? this.albumCoverUrl,
+      albumCoverUrl:
+          albumCoverUrl == _undefined
+              ? this.albumCoverUrl
+              : albumCoverUrl as String?,
+      timerMinutes: timerMinutes ?? this.timerMinutes,
     );
   }
 }
@@ -182,11 +213,26 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       print('🎵 最终播放状态: ${currentMusic?.curMusic ?? "无"}');
       print('🎵 当前音量: $volume');
 
+      // 🎯 检测歌曲切换
+      bool isSongChanged = false;
+      if (state.currentMusic != null && currentMusic != null) {
+        final oldSongName = state.currentMusic!.curMusic;
+        final newSongName = currentMusic.curMusic;
+        if (oldSongName != newSongName) {
+          isSongChanged = true;
+          print('🎵 检测到歌曲切换: "$oldSongName" -> "$newSongName"');
+        }
+      }
+
       // 智能进度同步校准机制
       bool needsRecalibration = false;
       bool useSmoothing = false;
 
-      if (state.currentMusic != null && currentMusic != null) {
+      if (isSongChanged) {
+        // 🎯 歌曲切换：立即重置进度基准
+        needsRecalibration = true;
+        print('🔄 歌曲已切换，重置进度基准');
+      } else if (state.currentMusic != null && currentMusic != null) {
         final localOffset = state.currentMusic!.offset;
         final serverOffset = currentMusic.offset;
         final offsetDiff = (serverOffset - localOffset).abs();
@@ -206,12 +252,14 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         }
       }
 
+      // 🎯 如果歌曲切换，清除旧的封面图
       state = state.copyWith(
         currentMusic: currentMusic,
         volume: volume,
         error: null,
         isLoading: silent ? state.isLoading : false,
         hasLoaded: true,
+        albumCoverUrl: isSongChanged ? null : state.albumCoverUrl,
       );
 
       // 智能更新预测基准
@@ -612,56 +660,6 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
   // 选设备交由 deviceProvider
 
-  Future<void> switchPlayMode() async {
-    final apiService = ref.read(apiServiceProvider);
-    final selectedDid = ref.read(deviceProvider).selectedDeviceId;
-    if (apiService == null || selectedDid == null) return;
-
-    // 循环切换播放模式
-    final currentMode = state.playMode;
-    final nextMode =
-        PlayMode.values[(currentMode.index + 1) % PlayMode.values.length];
-
-    try {
-      state = state.copyWith(isLoading: true);
-
-      // 使用服务器配置中的正确命令名称
-      String command;
-      switch (nextMode) {
-        case PlayMode.sequence:
-          command = 'set_play_type_seq'; // 顺序播放
-          break;
-        case PlayMode.loop:
-          command = 'set_play_type_all'; // 全部循环
-          break;
-        case PlayMode.single:
-          command = 'set_play_type_one'; // 单曲循环
-          break;
-        case PlayMode.random:
-          command = 'set_play_type_rnd'; // 随机播放
-          break;
-      }
-
-      print('🎵 切换播放模式: ${nextMode.displayName} (命令: $command)');
-
-      await apiService.executeCommand(did: selectedDid, command: command);
-
-      state = state.copyWith(playMode: nextMode, isLoading: false);
-
-      // 延迟刷新状态以确认模式切换
-      Future.delayed(
-        const Duration(milliseconds: 500),
-        () => refreshStatus(silent: true),
-      );
-    } catch (e) {
-      print('🎵 播放模式切换失败: $e');
-      state = state.copyWith(
-        isLoading: false,
-        error: '播放模式切换失败: ${e.toString()}',
-      );
-    }
-  }
-
   void _startProgressTimer(bool isPlaying) {
     _statusRefreshTimer?.cancel();
     _localProgressTimer?.cancel();
@@ -747,6 +745,122 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       state = state.copyWith(albumCoverUrl: coverUrl);
       print('[Playback] 🖼️  封面图已更新: $coverUrl');
     }
+  }
+
+  /// 🎵 切换播放模式
+  Future<void> switchPlayMode(PlayMode newMode) async {
+    final selectedDid = ref.read(deviceProvider).selectedDeviceId;
+    if (selectedDid == null) {
+      debugPrint('⚠️  未选择设备');
+      return;
+    }
+
+    final apiService = ref.read(apiServiceProvider);
+    if (apiService == null) {
+      debugPrint('⚠️  API服务未初始化');
+      return;
+    }
+
+    try {
+      debugPrint('🎵 切换播放模式: ${newMode.displayName} (${newMode.command})');
+      await apiService.executeCommand(
+        did: selectedDid,
+        command: newMode.command,
+      );
+
+      // 更新本地状态
+      state = state.copyWith(playMode: newMode);
+      debugPrint('✅ 播放模式已切换: ${newMode.displayName}');
+    } catch (e) {
+      debugPrint('❌ 切换播放模式失败: $e');
+      state = state.copyWith(error: '切换播放模式失败: ${e.toString()}');
+    }
+  }
+
+  /// ⭐ 加入收藏
+  Future<void> addToFavorites() async {
+    final selectedDid = ref.read(deviceProvider).selectedDeviceId;
+    if (selectedDid == null) {
+      debugPrint('⚠️  未选择设备');
+      state = state.copyWith(error: '未选择设备');
+      return;
+    }
+
+    final apiService = ref.read(apiServiceProvider);
+    if (apiService == null) {
+      debugPrint('⚠️  API服务未初始化');
+      state = state.copyWith(error: 'API服务未初始化');
+      return;
+    }
+
+    if (state.currentMusic == null) {
+      debugPrint('⚠️  当前没有播放歌曲');
+      state = state.copyWith(error: '当前没有播放歌曲');
+      return;
+    }
+
+    try {
+      debugPrint('⭐ 加入收藏: ${state.currentMusic!.curMusic}');
+      await apiService.executeCommand(did: selectedDid, command: '加入收藏');
+      debugPrint('✅ 已加入收藏');
+      // 不设置 error，避免覆盖现有状态
+    } catch (e) {
+      debugPrint('❌ 加入收藏失败: $e');
+      state = state.copyWith(error: '加入收藏失败: ${e.toString()}');
+    }
+  }
+
+  /// ⏰ 设置定时关机
+  Future<void> setTimer() async {
+    final selectedDid = ref.read(deviceProvider).selectedDeviceId;
+    if (selectedDid == null) {
+      debugPrint('⚠️  未选择设备');
+      state = state.copyWith(error: '未选择设备');
+      return;
+    }
+
+    final apiService = ref.read(apiServiceProvider);
+    if (apiService == null) {
+      debugPrint('⚠️  API服务未初始化');
+      state = state.copyWith(error: 'API服务未初始化');
+      return;
+    }
+
+    // 循环增加定时：0 -> 10 -> 15 -> 20 -> ... -> 60 -> 0
+    int nextMinutes;
+    if (state.timerMinutes == 0) {
+      nextMinutes = 10; // 初始为 10 分钟
+    } else if (state.timerMinutes >= 60) {
+      nextMinutes = 0; // 达到 60 分钟后归零（取消定时）
+    } else {
+      nextMinutes = state.timerMinutes + 5; // 每次增加 5 分钟
+    }
+
+    try {
+      if (nextMinutes == 0) {
+        // 取消定时：发送关机命令（实际上是取消定时）
+        debugPrint('⏰ 取消定时关机');
+        // 某些服务器可能需要特殊命令来取消，这里先不发送命令
+        state = state.copyWith(timerMinutes: 0);
+      } else {
+        debugPrint('⏰ 设置定时关机: $nextMinutes 分钟');
+        await apiService.executeCommand(
+          did: selectedDid,
+          command: '$nextMinutes分钟后关机',
+        );
+        state = state.copyWith(timerMinutes: nextMinutes);
+        debugPrint('✅ 定时关机已设置: $nextMinutes 分钟');
+      }
+    } catch (e) {
+      debugPrint('❌ 设置定时关机失败: $e');
+      state = state.copyWith(error: '设置定时关机失败: ${e.toString()}');
+    }
+  }
+
+  /// ⏰ 快速取消定时（长按）
+  void cancelTimer() {
+    debugPrint('⏰ 快速取消定时关机');
+    state = state.copyWith(timerMinutes: 0);
   }
 }
 
