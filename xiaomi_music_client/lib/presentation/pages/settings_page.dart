@@ -444,21 +444,24 @@ class SettingsPage extends ConsumerWidget {
         ),
       ),
       title: const Text('默认下载音质'),
-      trailing: DropdownButton<String>(
-        value: settings.defaultDownloadQuality,
-        underline: const SizedBox.shrink(),
-        items: const [
-          DropdownMenuItem(value: 'lossless', child: Text('无损音质')),
-          DropdownMenuItem(value: 'high', child: Text('高品质 (320k)')),
-          DropdownMenuItem(value: 'standard', child: Text('标准音质 (128k)')),
-        ],
-        onChanged: (value) {
-          if (value != null) {
-            ref.read(sourceSettingsProvider.notifier).save(
-              settings.copyWith(defaultDownloadQuality: value),
-            );
-          }
-        },
+      trailing: Padding(
+        padding: const EdgeInsets.only(right: 2),
+        child: DropdownButton<String>(
+          value: settings.defaultDownloadQuality,
+          underline: const SizedBox.shrink(),
+          items: const [
+            DropdownMenuItem(value: 'lossless', child: Text('无损音质')),
+            DropdownMenuItem(value: 'high', child: Text('高品质 (320k)')),
+            DropdownMenuItem(value: 'standard', child: Text('标准音质 (128k)')),
+          ],
+          onChanged: (value) {
+            if (value != null) {
+              ref.read(sourceSettingsProvider.notifier).save(
+                settings.copyWith(defaultDownloadQuality: value),
+              );
+            }
+          },
+        ),
       ),
     );
   }
@@ -489,27 +492,30 @@ class SettingsPage extends ConsumerWidget {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          trailing: InkWell(
-            onTap: () async {
-              final actualPath = await _getDownloadPath();
-              await Clipboard.setData(ClipboardData(text: actualPath));
-              if (context.mounted) {
-                AppSnackBar.show(
-                  context,
-                  const SnackBar(
-                    content: Text('已复制到剪贴板'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              }
-            },
-            borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.only(left: 8, top: 8, bottom: 8),
-              child: Icon(
-                Icons.copy_rounded,
-                color: onSurface.withOpacity(0.4),
-                size: 20,
+          trailing: Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: InkWell(
+              onTap: () async {
+                final actualPath = await _getDownloadPath();
+                await Clipboard.setData(ClipboardData(text: actualPath));
+                if (context.mounted) {
+                  AppSnackBar.show(
+                    context,
+                    const SnackBar(
+                      content: Text('已复制到剪贴板'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              },
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, top: 8, bottom: 8),
+                child: Icon(
+                  Icons.copy_rounded,
+                  color: onSurface.withOpacity(0.4),
+                  size: 20,
+                ),
               ),
             ),
           ),
