@@ -1163,6 +1163,11 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     if (coverUrl.isNotEmpty) {
       state = state.copyWith(albumCoverUrl: coverUrl);
       print('[Playback] 🖼️  封面图已更新: $coverUrl');
+
+      // 🎵 如果是本地播放模式，同时更新通知栏封面
+      if (_currentStrategy is LocalPlaybackStrategy) {
+        (_currentStrategy as LocalPlaybackStrategy).setAlbumCover(coverUrl);
+      }
     }
   }
 

@@ -1,17 +1,21 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:audio_service/audio_service.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/playing_music.dart';
 import '../models/music.dart';
 import 'music_api_service.dart';
 import 'playback_strategy.dart';
+import 'audio_handler_service.dart';
 
 /// 本地播放策略实现
 /// 使用 just_audio 在手机本地播放音乐
 class LocalPlaybackStrategy implements PlaybackStrategy {
   final MusicApiService _apiService;
   final AudioPlayer _player = AudioPlayer();
+  AudioHandlerService? _audioHandler;
 
   // SharedPreferences 缓存 key（与 PlaybackProvider 保持一致）
   static const String _cacheKeyUrl = 'local_playback_url';
@@ -22,6 +26,7 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
   int _currentIndex = 0;
   String? _currentMusicName;
   String? _currentMusicUrl;
+  String? _currentAlbumCover; // 当前封面图
 
   String? get currentMusicName => _currentMusicName;
   String? get currentMusicUrl => _currentMusicUrl;
@@ -29,10 +34,46 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
   // 状态流控制器
   final _statusController = StreamController<PlayingMusic>.broadcast();
 
+  // 上一首/下一首回调
+  Function()? onNext;
+  Function()? onPrevious;
+
   LocalPlaybackStrategy({required MusicApiService apiService})
     : _apiService = apiService {
+    _initAudioSession();
+    _initAudioService();
     _initPlayer();
     _loadCache(); // 🔧 启动时加载缓存
+  }
+
+  /// 初始化 AudioSession（配置音频焦点）
+  Future<void> _initAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+      debugPrint('✅ [LocalPlayback] AudioSession 初始化成功');
+    } catch (e) {
+      debugPrint('❌ [LocalPlayback] AudioSession 初始化失败: $e');
+    }
+  }
+
+  /// 初始化 AudioService
+  Future<void> _initAudioService() async {
+    try {
+      _audioHandler = await AudioService.init(
+        builder: () => AudioHandlerService(player: _player),
+        config: const AudioServiceConfig(
+          androidNotificationChannelId: 'com.xiaomi.music.channel.audio',
+          androidNotificationChannelName: '小爱音乐盒',
+          androidNotificationOngoing: true,
+          androidShowNotificationBadge: true,
+          androidStopForegroundOnPause: true,
+        ),
+      );
+      debugPrint('✅ [LocalPlayback] AudioService 初始化成功');
+    } catch (e) {
+      debugPrint('❌ [LocalPlayback] AudioService 初始化失败: $e');
+    }
   }
 
   void _initPlayer() {
@@ -185,11 +226,47 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
       await _player.setUrl(playUrl);
       await _player.play();
 
+      // 🎵 更新媒体通知信息
+      await _updateMediaNotification(
+        title: musicName,
+        artist: platform ?? '未知艺术家',
+        album: '本地播放',
+      );
+
       debugPrint('✅ [LocalPlayback] 开始播放: $musicName');
       _emitCurrentStatus();
     } catch (e) {
       debugPrint('❌ [LocalPlayback] 播放失败: $e');
       rethrow;
+    }
+  }
+
+  /// 更新媒体通知信息
+  Future<void> _updateMediaNotification({
+    required String title,
+    String? artist,
+    String? album,
+  }) async {
+    if (_audioHandler == null) return;
+
+    await _audioHandler!.setMediaItem(
+      title: title,
+      artist: artist,
+      album: album,
+      artUri: _currentAlbumCover,
+      duration: _player.duration,
+    );
+  }
+
+  /// 设置封面图（由 PlaybackProvider 调用）
+  void setAlbumCover(String? coverUrl) {
+    _currentAlbumCover = coverUrl;
+    if (_currentMusicName != null) {
+      _updateMediaNotification(
+        title: _currentMusicName!,
+        artist: '未知艺术家',
+        album: '本地播放',
+      );
     }
   }
 
@@ -265,6 +342,7 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
     await _player.stop();
     await _player.dispose();
     await _statusController.close();
+    await _audioHandler?.stop();
   }
 
   /// 发射当前播放状态到流
