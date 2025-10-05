@@ -8,7 +8,7 @@ import 'js_script_manager_provider.dart';
 import '../../data/adapters/search_adapter.dart';
 // import 'js_source_provider.dart'; // JS 搜索路径已移除
 import 'js_proxy_provider.dart';
-import 'unified_js_provider.dart'; // ✨ 使用新的统一JS服务
+import 'js_proxy_provider.dart';
 
 class MusicSearchState {
   final List<Music> searchResults;
@@ -145,51 +145,27 @@ class MusicSearchNotifier extends StateNotifier<MusicSearchState> {
         '[XMC] 🎵 [MusicSearch] 音源策略: preferJs=$preferJs, preferUnified=$preferUnified',
       );
 
-      // 🎯 如果用户选择了JS音源，检查是否有可用的脚本
+      // 🎯 如果用户选择了JS音源，检查是否有可用的脚本（统一使用 EnhancedJSProxyExecutorService）
       if (preferJs) {
-        // ✨ 优先检查新的统一JS服务
-        final unifiedJsState = ref.read(unifiedJsProvider);
+        final scripts = ref.read(jsScriptManagerProvider);
+        final scriptManager = ref.read(jsScriptManagerProvider.notifier);
+        final selectedScript = scriptManager.selectedScript;
+        final jsState = ref.read(jsProxyProvider);
 
-        if (unifiedJsState.isReady) {
-          // 新的统一服务已就绪，可以直接使用
-          print('[XMC] ✅ 使用统一JS服务（已预加载）');
-        } else {
-          // 统一服务未就绪，检查传统方式
-          final scripts = ref.read(jsScriptManagerProvider);
-          final scriptManager = ref.read(jsScriptManagerProvider.notifier);
-          final selectedScript = scriptManager.selectedScript;
-
-          if (scripts.isEmpty) {
-            // 用户选择了JS音源但没有导入任何脚本
-            throw Exception('未导入JS脚本\n请先在设置中导入JS脚本才能使用JS音源搜索');
-          } else if (selectedScript == null) {
-            // 有脚本但没有选中任何脚本
-            throw Exception('未选择JS脚本\n已导入${scripts.length}个脚本，请在设置中选择一个使用');
-          } else if (unifiedJsState.isLoading) {
-            // JS正在加载中
-            throw Exception('JS脚本正在加载中\n请稍候再试');
-          } else if (unifiedJsState.error != null) {
-            // JS加载失败
-            throw Exception('JS脚本加载失败\n${unifiedJsState.error}');
-          } else {
-            // 有脚本但未加载，尝试加载
-            print('[XMC] ⚠️ JS脚本未加载，尝试自动加载...');
-            try {
-              final success = await ref
-                  .read(unifiedJsProvider.notifier)
-                  .loadScript(
-                    selectedScript,
-                    cookieNetease: settings.cookieNetease,
-                    cookieTencent: settings.cookieTencent,
-                  );
-              if (!success) {
-                throw Exception('JS脚本自动加载失败\n请手动重新加载或检查脚本');
-              }
-              print('[XMC] ✅ JS脚本自动加载成功');
-            } catch (e) {
-              throw Exception('JS脚本自动加载异常\n$e');
-            }
-          }
+        if (scripts.isEmpty) {
+          throw Exception('未导入JS脚本\n请先在设置中导入JS脚本才能使用JS音源搜索');
+        }
+        if (selectedScript == null) {
+          throw Exception('未选择JS脚本\n已导入${scripts.length}个脚本，请在设置中选择一个使用');
+        }
+        if (!jsState.isInitialized) {
+          throw Exception('JS运行时未初始化\n请稍候或重启应用');
+        }
+        if (jsState.currentScript == null) {
+          print('[XMC] ⚠️ JS脚本未加载，尝试自动加载(EnhancedJSProxy)');
+          final ok = await ref.read(jsProxyProvider.notifier).loadScriptByScript(selectedScript);
+          if (!ok) throw Exception('JS脚本加载失败\n请检查脚本内容或网络');
+          print('[XMC] ✅ JS脚本自动加载成功');
         }
       }
 

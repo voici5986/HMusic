@@ -4,6 +4,7 @@ import '../../data/models/online_music_result.dart';
 import '../../data/models/js_script.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/source_settings_provider.dart';
 import '../providers/js_script_manager_provider.dart';
 
@@ -156,22 +157,44 @@ class JSProxyNotifier extends StateNotifier<JSProxyState> {
     }
   }
 
-  /// 根据 JsScript 条目加载脚本（支持URL/本地文件/内置）
+  /// 根据 JsScript 条目加载脚本（支持URL/本地文件/内置），带本地缓存
   Future<bool> loadScriptByScript(JsScript script) async {
     try {
       String? content;
       String scriptName = script.name;
+      final prefs = await SharedPreferences.getInstance();
+      final cacheKey = _buildCacheKey(script);
 
-      if (script.source == JsScriptSource.localFile) {
-        // 读取本地文件内容
-        final manager = JSProxyScriptReader();
-        content = await manager.readLocal(script.content);
-      } else {
-        // 视为URL，直接下载文本
-        final url = script.content;
-        final resp = await http.get(Uri.parse(url));
-        if (resp.statusCode == 200) {
-          content = resp.body;
+      // 1) 先尝试读取缓存
+      content = prefs.getString(cacheKey);
+      if (content != null && content.isNotEmpty) {
+        print('[JSProxyProvider] 💾 使用已缓存脚本: ${script.name} (${content.length} chars)');
+      }
+
+      // 2) 缓存为空则读取源
+      if (content == null || content.isEmpty) {
+        if (script.source == JsScriptSource.localFile) {
+          final manager = JSProxyScriptReader();
+          content = await manager.readLocal(script.content);
+          if (content != null) {
+            print('[JSProxyProvider] 📂 读取本地脚本成功: ${script.content} (${content.length} chars)');
+          }
+        } else if (script.source == JsScriptSource.url) {
+          final url = script.content;
+          final resp = await http.get(Uri.parse(url));
+          if (resp.statusCode == 200) {
+            content = resp.body;
+            print('[JSProxyProvider] 🌐 下载脚本成功: ${url} (${content.length} chars)');
+          }
+        } else {
+          content = script.content;
+          print('[JSProxyProvider] 🏷️ 内置脚本长度: ${content.length}');
+        }
+
+        // 3) 成功读取后写入缓存
+        if (content != null && content.isNotEmpty) {
+          await prefs.setString(cacheKey, content);
+          print('[JSProxyProvider] ✅ 已缓存脚本内容: $cacheKey');
         }
       }
 
@@ -179,11 +202,17 @@ class JSProxyNotifier extends StateNotifier<JSProxyState> {
         print('[JSProxyProvider] ❌ 读取脚本内容失败');
         return false;
       }
+
       return await loadScript(content, scriptName: scriptName);
     } catch (e) {
       print('[JSProxyProvider] ❌ loadScriptByScript 异常: $e');
       return false;
     }
+  }
+
+  String _buildCacheKey(JsScript script) {
+    final idPart = (script.id ?? script.name).toString();
+    return 'js_cached_content_$idPart';
   }
 
   /// 从URL加载JS脚本
@@ -391,6 +420,42 @@ class JSProxyNotifier extends StateNotifier<JSProxyState> {
       error: null,
     );
     print('[JSProxyProvider] 🧹 已清除当前脚本');
+  }
+
+  /// 清除当前选中脚本的缓存内容
+  Future<bool> clearCurrentScriptCache() async {
+    try {
+      final scripts = _ref.read(jsScriptManagerProvider);
+      final manager = _ref.read(jsScriptManagerProvider.notifier);
+      final selected = manager.selectedScript;
+      if (selected == null) return false;
+      final prefs = await SharedPreferences.getInstance();
+      final cacheKey = _buildCacheKey(selected);
+      final ok = await prefs.remove(cacheKey);
+      print('[JSProxyProvider] 🧹 已清除缓存: $cacheKey -> $ok');
+      return ok;
+    } catch (e) {
+      print('[JSProxyProvider] ❌ 清除当前脚本缓存失败: $e');
+      return false;
+    }
+  }
+
+  /// 清除所有脚本缓存
+  Future<int> clearAllScriptCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys().where((k) => k.startsWith('js_cached_content_')).toList();
+      int removed = 0;
+      for (final k in keys) {
+        final ok = await prefs.remove(k);
+        if (ok) removed++;
+      }
+      print('[JSProxyProvider] 🧹 已清除 ${removed}/${keys.length} 个脚本缓存');
+      return removed;
+    } catch (e) {
+      print('[JSProxyProvider] ❌ 清除所有脚本缓存失败: $e');
+      return 0;
+    }
   }
 
   @override

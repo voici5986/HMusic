@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/playing_music.dart';
 import '../models/music.dart';
 import 'music_api_service.dart';
@@ -12,11 +13,18 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
   final MusicApiService _apiService;
   final AudioPlayer _player = AudioPlayer();
 
+  // SharedPreferences 缓存 key（与 PlaybackProvider 保持一致）
+  static const String _cacheKeyUrl = 'local_playback_url';
+  static const String _cacheKeyName = 'local_playback_current_name';
+
   // 播放列表
   List<Music> _playlist = [];
   int _currentIndex = 0;
   String? _currentMusicName;
   String? _currentMusicUrl;
+
+  String? get currentMusicName => _currentMusicName;
+  String? get currentMusicUrl => _currentMusicUrl;
 
   // 状态流控制器
   final _statusController = StreamController<PlayingMusic>.broadcast();
@@ -24,14 +32,18 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
   LocalPlaybackStrategy({required MusicApiService apiService})
     : _apiService = apiService {
     _initPlayer();
+    _loadCache(); // 🔧 启动时加载缓存
   }
 
   void _initPlayer() {
     // 监听播放状态变化
     _player.playerStateStream.listen((state) {
       debugPrint(
-        '🎵 [LocalPlayback] 播放器状态: ${state.playing}, ${state.processingState}',
+        '🎵 [LocalPlayback] 播放器状态变化: playing=${state.playing}, processingState=${state.processingState}',
       );
+
+      // 状态变化时立即更新UI
+      _emitCurrentStatus();
 
       // 自动播放下一首
       if (state.processingState == ProcessingState.completed) {
@@ -41,9 +53,12 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
     });
 
     // 监听位置变化（用于更新进度）
+    int lastEmittedSecond = -1;
     _player.positionStream.listen((position) {
-      // 每秒更新一次状态
-      if (position.inSeconds % 1 == 0) {
+      final currentSecond = position.inSeconds;
+      // 每秒更新一次状态，避免重复更新
+      if (currentSecond != lastEmittedSecond) {
+        lastEmittedSecond = currentSecond;
         _emitCurrentStatus();
       }
     });
@@ -55,8 +70,36 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
   @override
   Future<void> play() async {
     debugPrint('🎵 [LocalPlayback] 执行播放');
-    await _player.play();
-    _emitCurrentStatus();
+    try {
+      final ps = _player.playerState;
+      debugPrint('🎵 [LocalPlayback] 当前播放器状态: ${ps.processingState}, playing: ${ps.playing}');
+
+      if (ps.processingState == ProcessingState.idle) {
+        // 🔧 如果播放器是 idle，尝试从缓存恢复
+        if (_currentMusicUrl == null || _currentMusicUrl!.isEmpty) {
+          await _loadCache();
+        }
+
+        if (_currentMusicUrl != null && _currentMusicUrl!.isNotEmpty) {
+          debugPrint('🎵 [LocalPlayback] idle -> 先setUrl再play, URL: $_currentMusicUrl');
+          await _player.setUrl(_currentMusicUrl!);
+        } else {
+          debugPrint('⚠️ [LocalPlayback] 无可用URL，忽略play');
+          return;
+        }
+      }
+
+      // 确保播放器已准备就绪
+      debugPrint('🎵 [LocalPlayback] 开始播放，当前进度: ${_player.position.inSeconds}s');
+      await _player.play();
+
+      // 立即发射状态，确保UI更新
+      _emitCurrentStatus();
+      debugPrint('✅ [LocalPlayback] 播放成功，播放器状态: ${_player.playing}');
+    } catch (e) {
+      debugPrint('❌ [LocalPlayback] play失败: $e');
+      rethrow;
+    }
   }
 
   @override
@@ -136,6 +179,9 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
       _currentMusicName = musicName;
       _currentMusicUrl = playUrl;
 
+      // 🔧 立即保存到缓存
+      await _saveCache();
+
       await _player.setUrl(playUrl);
       await _player.play();
 
@@ -186,6 +232,33 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
     return (volume * 100).round();
   }
 
+  Future<void> prepareFromCache({required String url, String? name, int offset = 0}) async {
+    try {
+      debugPrint('🔧 [LocalPlayback] 从缓存预加载: $name, offset: $offset, URL: $url');
+
+      // 直接使用传入的 URL 和 name
+      _currentMusicUrl = url;
+      if (name != null && name.isNotEmpty) {
+        _currentMusicName = name;
+      }
+
+      // 保存到持久化缓存
+      await _saveCache();
+
+      // 设置播放器
+      await _player.setUrl(url);
+      if (offset > 0) {
+        await _player.seek(Duration(seconds: offset));
+      }
+
+      // 立即发送状态更新，确保UI获取到正确的播放器状态
+      _emitCurrentStatus();
+      debugPrint('✅ [LocalPlayback] 预加载完成，播放器状态: ${_player.playing}, 进度: ${_player.position.inSeconds}/${_player.duration?.inSeconds ?? 0}');
+    } catch (e) {
+      debugPrint('❌ [LocalPlayback] 预加载失败: $e');
+    }
+  }
+
   @override
   Future<void> dispose() async {
     debugPrint('🎵 [LocalPlayback] 释放播放器资源');
@@ -215,4 +288,40 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
 
   /// 获取状态流
   Stream<PlayingMusic> get statusStream => _statusController.stream;
+
+  /// 🔧 从缓存加载当前播放的 URL 和歌曲名
+  Future<void> _loadCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _currentMusicUrl = prefs.getString(_cacheKeyUrl);
+      _currentMusicName = prefs.getString(_cacheKeyName);
+
+      debugPrint('🔧 [LocalPlayback] 从缓存加载:');
+      debugPrint('   - 歌曲名: ${_currentMusicName ?? "null"}');
+      debugPrint('   - URL: ${_currentMusicUrl ?? "null"}');
+    } catch (e) {
+      debugPrint('❌ [LocalPlayback] 加载缓存失败: $e');
+    }
+  }
+
+  /// 🔧 保存当前播放的 URL 和歌曲名到缓存
+  Future<void> _saveCache() async {
+    try {
+      if (_currentMusicUrl == null || _currentMusicUrl!.isEmpty) {
+        return;
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cacheKeyUrl, _currentMusicUrl!);
+      if (_currentMusicName != null) {
+        await prefs.setString(_cacheKeyName, _currentMusicName!);
+      }
+
+      debugPrint('💾 [LocalPlayback] 已保存缓存:');
+      debugPrint('   - 歌曲名: $_currentMusicName');
+      debugPrint('   - URL: $_currentMusicUrl');
+    } catch (e) {
+      debugPrint('❌ [LocalPlayback] 保存缓存失败: $e');
+    }
+  }
 }

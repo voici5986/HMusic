@@ -636,9 +636,7 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             height: fixedTitleHeight,
             child: Center(
               child: Text(
-                currentMusic != null
-                    ? currentMusic.curMusic
-                    : (hasLoaded ? '暂无播放' : '加载中...'),
+                currentMusic != null ? currentMusic.curMusic : '暂无播放',
                 style: const TextStyle(
                   fontSize: titleFontSize,
                   fontWeight: FontWeight.bold,
@@ -660,19 +658,6 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
                   (currentMusic != null && currentMusic.curPlaylist != null)
                       ? Text(
                         currentMusic.curPlaylist,
-                        style: TextStyle(
-                          fontSize: subtitleFontSize,
-                          fontWeight: FontWeight.w500,
-                          color: onSurface.withOpacity(0.7),
-                          height: subtitleLineHeight,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      )
-                      : (!hasLoaded)
-                      ? Text(
-                        '正在连接服务器...',
                         style: TextStyle(
                           fontSize: subtitleFontSize,
                           fontWeight: FontWeight.w500,

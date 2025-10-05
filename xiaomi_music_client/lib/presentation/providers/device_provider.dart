@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/models/device.dart';
 import 'auth_provider.dart';
@@ -7,6 +8,7 @@ import 'dio_provider.dart';
 
 // 用于区分"未传入参数"和"传入 null"
 const _undefined = Object();
+const String _kSelectedDeviceKey = 'selected_device_id';
 
 class DeviceState {
   final List<Device> devices;
@@ -43,17 +45,15 @@ class DeviceNotifier extends StateNotifier<DeviceState> {
   final Ref ref;
 
   DeviceNotifier(this.ref) : super(const DeviceState()) {
-    // 监听认证状态变化
+    _loadSavedSelection();
     ref.listen<AuthState>(authProvider, (prev, next) {
       if (next is AuthAuthenticated && prev is! AuthAuthenticated) {
-        // 用户登录后自动加载设备列表
         debugPrint('DeviceProvider: 用户已认证，自动加载设备列表');
         Future.delayed(const Duration(milliseconds: 1000), () {
           loadDevices();
         });
       }
       if (next is AuthInitial) {
-        // 登出时清空设备状态
         state = const DeviceState();
       }
     });
@@ -174,12 +174,10 @@ class DeviceNotifier extends StateNotifier<DeviceState> {
         error: null,
       );
 
-      // 🎯 设备选择逻辑（使用 allDevices，包含本机设备）
       if (allDevices.isEmpty) {
         debugPrint('🎯 [DeviceProvider] 设备列表为空（理论上不应该发生，因为至少有本机设备）');
         state = state.copyWith(selectedDeviceId: null);
       } else if (state.selectedDeviceId == null) {
-        // 没有选中任何设备时，自动选中第一个在线设备（优先本机设备）
         final onlineDevice = allDevices.firstWhere(
           (d) => d.isOnline == true,
           orElse: () => allDevices.first,
@@ -189,10 +187,8 @@ class DeviceNotifier extends StateNotifier<DeviceState> {
         );
         state = state.copyWith(selectedDeviceId: onlineDevice.id);
       } else {
-        // 已选中设备时，检查该设备是否还在列表中
         final exists = allDevices.any((d) => d.id == state.selectedDeviceId);
         if (!exists) {
-          // 之前选中的设备不在列表中，重新选择一个在线设备
           final onlineDevice = allDevices.firstWhere(
             (d) => d.isOnline == true,
             orElse: () => allDevices.first,
@@ -206,12 +202,26 @@ class DeviceNotifier extends StateNotifier<DeviceState> {
     }
   }
 
-  void selectDevice(String deviceId) {
+  void selectDevice(String deviceId) async {
     state = state.copyWith(selectedDeviceId: deviceId);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kSelectedDeviceKey, deviceId);
+    } catch (_) {}
   }
 
   void clearError() {
     state = state.copyWith(error: null);
+  }
+
+  Future<void> _loadSavedSelection() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_kSelectedDeviceKey);
+      if (saved != null && saved.isNotEmpty) {
+        state = state.copyWith(selectedDeviceId: saved);
+      }
+    } catch (_) {}
   }
 }
 

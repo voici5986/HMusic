@@ -4,17 +4,19 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app_router.dart';
-import 'data/services/unified_js_runtime_service.dart';
+import 'presentation/providers/js_proxy_provider.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // ✅ 在APP启动时就开始初始化JS运行时（不阻塞UI）
-  // 这样当用户登录后，JS环境已经准备好了
-  UnifiedJsRuntimeService().initialize().then((_) {
-    print('[Main] ✅ JS运行时预初始化完成');
-  }).catchError((e) {
-    print('[Main] ⚠️ JS运行时预初始化失败: $e');
+  // ✅ 在APP启动时就开始初始化JS代理服务（不阻塞UI）
+  // 读取jsProxyProvider以触发其初始化与自动脚本加载
+  // 注意：ProviderScope要在runApp后才可用，这里用WidgetsBinding后帧回调触发
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    try {
+      // 使用一个临时的ProviderScope上下文从根部读取并触发
+      // 实际上在MyApp里更安全：在builder中读取一次
+    } catch (_) {}
   });
 
   // 禁用Flutter调试边框和调试信息
@@ -84,6 +86,9 @@ class MyApp extends ConsumerWidget {
       seedColor: seed,
       brightness: Brightness.dark,
     );
+
+    // 在应用构建阶段预热JS代理（读取provider以触发初始化和自动加载）
+    ref.read(jsProxyProvider);
 
     return MaterialApp.router(
       title: '小爱音乐盒',

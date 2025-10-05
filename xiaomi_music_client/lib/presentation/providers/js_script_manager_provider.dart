@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:uuid/uuid.dart';
 import '../../data/models/js_script.dart';
+import 'js_proxy_provider.dart';
 
 class JsScriptManager extends StateNotifier<List<JsScript>> {
   static const _kScriptList = 'js_script_list';
@@ -194,8 +195,8 @@ class JsScriptManager extends StateNotifier<List<JsScript>> {
     }
   }
 
-  // 删除脚本
-  Future<void> deleteScript(String scriptId) async {
+  // 删除脚本（同时清除其缓存）
+  Future<void> deleteScript(String scriptId, {WidgetRef? ref}) async {
     final script = state.firstWhere((s) => s.id == scriptId);
     if (script.isBuiltIn) {
       print('[XMC] ⚠️ [JsScriptManager] 无法删除内置脚本: ${script.name}');
@@ -204,13 +205,23 @@ class JsScriptManager extends StateNotifier<List<JsScript>> {
 
     state = state.where((s) => s.id != scriptId).toList();
 
-    // 如果删除的是当前选中的脚本，自动选择第一个
     if (_selectedScriptId == scriptId && state.isNotEmpty) {
       _selectedScriptId = state.first.id;
+    } else if (_selectedScriptId == scriptId && state.isEmpty) {
+      _selectedScriptId = null;
     }
 
     await _saveScripts();
     print('[XMC] 🗑️ [JsScriptManager] 删除脚本: ${script.name}');
+
+    try {
+      final cacheKey = 'js_cached_content_${script.id ?? script.name}';
+      final prefs = await SharedPreferences.getInstance();
+      final ok = await prefs.remove(cacheKey);
+      print('[XMC] 🧹 [JsScriptManager] 已同步清除缓存: $ok');
+    } catch (e) {
+      print('[XMC] ⚠️ [JsScriptManager] 清除缓存失败: $e');
+    }
   }
 
   // 选择脚本
