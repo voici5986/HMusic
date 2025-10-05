@@ -362,8 +362,8 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
         // iOS 使用应用文档目录
         dir = await getApplicationDocumentsDirectory();
       } else {
-        // Android 使用自定义目录 /storage/download/jiujiu
-        dir = Directory('/storage/download/jiujiu');
+        // Android 使用自定义目录 /storage/download/HMusic
+        dir = Directory('/storage/download/HMusic');
         // 如果目录不存在，创建它
         if (!await dir.exists()) {
           await dir.create(recursive: true);

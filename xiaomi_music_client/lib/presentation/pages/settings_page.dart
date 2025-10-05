@@ -517,11 +517,11 @@ class SettingsPage extends ConsumerWidget {
   String _getQualityDescription(String quality) {
     switch (quality) {
       case 'lossless':
-        return '尝试：hires → flac → 320k → 128k';
+        return 'hires → flac → 320k → 128k';
       case 'high':
-        return '尝试：320k → 128k';
+        return '320k → 128k';
       case 'standard':
-        return '固定：128k';
+        return '128k';
       default:
         return '未知';
     }
@@ -536,7 +536,7 @@ class SettingsPage extends ConsumerWidget {
         return '${dir.path}\n(iOS 应用沙盒 Documents 目录)';
       } else {
         // Android 使用自定义下载目录
-        return '/storage/download/jiujiu';
+        return '/storage/download/HMusic';
       }
     } catch (e) {
       return '获取路径失败: $e';
