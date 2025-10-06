@@ -365,43 +365,15 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
         dir = await getApplicationDocumentsDirectory();
       } else {
         final hasStorage = await Permission.storage.isGranted;
-        final hasManage = await Permission.manageExternalStorage.isGranted;
-        if (!hasStorage || !hasManage) {
+        if (!hasStorage) {
           await Permission.storage.request();
-          await Permission.manageExternalStorage.request();
-          if (!await Permission.storage.isGranted ||
-              !await Permission.manageExternalStorage.isGranted) {
-            if (mounted) {
-              AppSnackBar.show(
-                context,
-                const SnackBar(
-                  content: Text('请授予存储与“管理所有文件”权限后再试'),
-                  backgroundColor: Colors.orange,
-                  duration: Duration(seconds: 5),
-                ),
-              );
-            }
-            await openAppSettings();
-            return;
-          }
+          if (!await Permission.storage.isGranted) return;
         }
-        dir = Directory('/storage/emulated/0/Download/HMusic');
+        final bases = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+        final base = bases?.isNotEmpty == true ? bases!.first : Directory('/storage/emulated/0/Download');
+        dir = Directory(p.join(base.path, 'HMusic'));
         if (!await dir.exists()) {
-          try {
-            await dir.create(recursive: true);
-          } catch (e) {
-            if (mounted) {
-              AppSnackBar.show(
-                context,
-                SnackBar(
-                  content: Text('无法创建目录: ${dir.path}\n$e'),
-                  backgroundColor: Colors.red,
-                  duration: const Duration(seconds: 5),
-                ),
-              );
-            }
-            return;
-          }
+          await dir.create(recursive: true);
         }
       }
 
