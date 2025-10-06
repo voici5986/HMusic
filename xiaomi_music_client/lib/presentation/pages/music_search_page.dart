@@ -364,9 +364,28 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
       if (Platform.isIOS) {
         dir = await getApplicationDocumentsDirectory();
       } else {
-        await Permission.storage.request();
-        await Permission.manageExternalStorage.request();
-        dir = Directory('/storage/download/HMusic');
+        final hasStorage = await Permission.storage.isGranted;
+        final hasManage = await Permission.manageExternalStorage.isGranted;
+        if (!hasStorage || !hasManage) {
+          await Permission.storage.request();
+          await Permission.manageExternalStorage.request();
+          if (!await Permission.storage.isGranted ||
+              !await Permission.manageExternalStorage.isGranted) {
+            if (mounted) {
+              AppSnackBar.show(
+                context,
+                const SnackBar(
+                  content: Text('请授予存储与“管理所有文件”权限后再试'),
+                  backgroundColor: Colors.orange,
+                  duration: Duration(seconds: 5),
+                ),
+              );
+            }
+            await openAppSettings();
+            return;
+          }
+        }
+        dir = Directory('/storage/emulated/0/Download/HMusic');
         if (!await dir.exists()) {
           try {
             await dir.create(recursive: true);
@@ -374,14 +393,13 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
             if (mounted) {
               AppSnackBar.show(
                 context,
-                const SnackBar(
-                  content: Text('⚠️ 无法创建目录 /storage/download/HMusic，请在系统设置授予存储权限'),
-                  backgroundColor: Colors.orange,
-                  duration: Duration(seconds: 5),
+                SnackBar(
+                  content: Text('无法创建目录: ${dir.path}\n$e'),
+                  backgroundColor: Colors.red,
+                  duration: const Duration(seconds: 5),
                 ),
               );
             }
-            await openAppSettings();
             return;
           }
         }
