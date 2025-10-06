@@ -7,7 +7,9 @@ import 'package:flutter/foundation.dart';
 class AudioHandlerService extends BaseAudioHandler with QueueHandler, SeekHandler {
   final AudioPlayer _player;
 
-  // 当前播放的媒体项
+  // 🔧 暴露 AudioPlayer 实例,供 LocalPlaybackStrategy 共享使用
+  AudioPlayer get player => _player;
+
   MediaItem? _currentMediaItem;
 
   AudioHandlerService({required AudioPlayer player}) : _player = player {
@@ -15,12 +17,30 @@ class AudioHandlerService extends BaseAudioHandler with QueueHandler, SeekHandle
   }
 
   void _init() {
+    debugPrint('🧩 [AudioHandler] 初始化');
+    // 初始状态
+    playbackState.add(
+      PlaybackState(
+        processingState: AudioProcessingState.idle,
+        playing: false,
+        controls: const [MediaControl.play],
+        systemActions: const {MediaAction.seek, MediaAction.seekForward, MediaAction.seekBackward},
+      ),
+    );
+
     // 监听播放状态变化
     _player.playerStateStream.listen((playerState) {
+      debugPrint('🧩 [AudioHandler] playerState: playing=${playerState.playing}, state=${playerState.processingState}');
       final isPlaying = playerState.playing;
       final processingState = playerState.processingState;
 
-      // 更新播放状态到系统通知
+      // 🔧 将 ready 和 completed 状态都映射为 ready,确保通知栏正常显示
+      final mappedState = _mapProcessingState(processingState);
+      final effectiveState = (mappedState == AudioProcessingState.ready ||
+                             mappedState == AudioProcessingState.completed)
+          ? AudioProcessingState.ready
+          : mappedState;
+
       playbackState.add(playbackState.value.copyWith(
         playing: isPlaying,
         controls: [
@@ -33,27 +53,48 @@ class AudioHandlerService extends BaseAudioHandler with QueueHandler, SeekHandle
           MediaAction.seekForward,
           MediaAction.seekBackward,
         },
-        processingState: _mapProcessingState(processingState),
+        processingState: effectiveState,
         updatePosition: _player.position,
+        bufferedPosition: _player.bufferedPosition,
+        speed: _player.speed,
       ));
     });
 
     // 监听播放进度
     _player.positionStream.listen((position) {
+      debugPrint('🧩 [AudioHandler] position: ${position.inMilliseconds}ms');
       playbackState.add(playbackState.value.copyWith(
         updatePosition: position,
       ));
     });
 
-    // 监听播放完成
+    // 监听缓冲进度和倍速变化以同步到系统
+    _player.bufferedPositionStream.listen((bp) {
+      debugPrint('🧩 [AudioHandler] buffered: ${bp.inMilliseconds}ms');
+      playbackState.add(playbackState.value.copyWith(bufferedPosition: bp));
+    });
+    _player.speedStream.listen((sp) {
+      debugPrint('🧩 [AudioHandler] speed: $sp');
+      playbackState.add(playbackState.value.copyWith(speed: sp));
+    });
+
+    // 监听时长变化，及时更新媒体项以便控制中心显示进度条
+    _player.durationStream.listen((d) {
+      if (_currentMediaItem != null && d != null) {
+        _currentMediaItem = _currentMediaItem!.copyWith(duration: d);
+        mediaItem.add(_currentMediaItem);
+      }
+    });
+
+    // 播放完成自动下一首
     _player.processingStateStream.listen((state) {
+      debugPrint('🧩 [AudioHandler] processingState: $state');
       if (state == ProcessingState.completed) {
         skipToNext();
       }
     });
   }
 
-  /// 映射 just_audio 的 ProcessingState 到 audio_service 的 AudioProcessingState
   AudioProcessingState _mapProcessingState(ProcessingState state) {
     switch (state) {
       case ProcessingState.idle:
@@ -69,7 +110,6 @@ class AudioHandlerService extends BaseAudioHandler with QueueHandler, SeekHandle
     }
   }
 
-  /// 更新当前媒体信息（歌曲名、艺术家、封面等）
   Future<void> setMediaItem({
     required String title,
     String? artist,
@@ -94,12 +134,34 @@ class AudioHandlerService extends BaseAudioHandler with QueueHandler, SeekHandle
   Future<void> play() async {
     debugPrint('🎵 [AudioHandler] 播放');
     await _player.play();
+
+    // 🔧 强制更新播放状态,确保通知栏显示正确
+    playbackState.add(playbackState.value.copyWith(
+      playing: true,
+      processingState: AudioProcessingState.ready,
+      controls: [
+        MediaControl.skipToPrevious,
+        MediaControl.pause,
+        MediaControl.skipToNext,
+      ],
+    ));
   }
 
   @override
   Future<void> pause() async {
     debugPrint('🎵 [AudioHandler] 暂停');
     await _player.pause();
+
+    // 🔧 强制更新暂停状态,确保通知栏显示正确
+    playbackState.add(playbackState.value.copyWith(
+      playing: false,
+      processingState: AudioProcessingState.ready,
+      controls: [
+        MediaControl.skipToPrevious,
+        MediaControl.play,
+        MediaControl.skipToNext,
+      ],
+    ));
   }
 
   @override
@@ -118,26 +180,21 @@ class AudioHandlerService extends BaseAudioHandler with QueueHandler, SeekHandle
   @override
   Future<void> skipToNext() async {
     debugPrint('🎵 [AudioHandler] 下一首');
-    // 这里需要通过回调通知 LocalPlaybackStrategy
-    // 暂时先触发一个事件
     customAction('skipToNext');
   }
 
   @override
   Future<void> skipToPrevious() async {
     debugPrint('🎵 [AudioHandler] 上一首');
-    // 这里需要通过回调通知 LocalPlaybackStrategy
     customAction('skipToPrevious');
   }
 
   @override
   Future<void> customAction(String name, [Map<String, dynamic>? extras]) async {
     debugPrint('🎵 [AudioHandler] 自定义操作: $name');
-    // 可以通过广播事件或回调来处理
     return super.customAction(name, extras);
   }
 
-  /// 清除通知
   Future<void> clearNotification() async {
     await stop();
     mediaItem.add(null);

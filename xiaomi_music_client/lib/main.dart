@@ -2,12 +2,53 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:audio_service/audio_service.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import 'app_router.dart';
 import 'presentation/providers/js_proxy_provider.dart';
+import 'data/services/audio_handler_service.dart';
+import 'data/services/local_playback_strategy.dart';
+import 'package:permission_handler/permission_handler.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    // warm-up by touching singleton instance
+    // ignore: unnecessary_statements
+    DefaultCacheManager();
+  } catch (_) {}
+
+  // 预初始化全局 AudioService（单例）
+  try {
+    debugPrint('🎵 [Main] 开始初始化 AudioService...');
+    final player = AudioPlayer();
+    final handler = await AudioService.init(
+      builder: () => AudioHandlerService(player: player),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.xiaomi.music.channel.audio',
+        androidNotificationChannelName: '小爱音乐盒',
+        androidNotificationOngoing: true,
+        androidShowNotificationBadge: true,
+        androidStopForegroundOnPause: true,
+      ),
+    );
+    if (handler is AudioHandlerService) {
+      LocalPlaybackStrategy.sharedAudioHandler = handler;
+      debugPrint('✅ [Main] AudioService 初始化成功');
+    } else {
+      debugPrint('❌ [Main] AudioService 类型不匹配: ${handler.runtimeType}');
+    }
+  } catch (e) {
+    debugPrint('❌ [Main] AudioService 初始化失败: $e');
+  }
+
+  // Android 13+ 请求通知权限
+  try {
+    await Permission.notification.request();
+  } catch (_) {}
   
   // ✅ 在APP启动时就开始初始化JS代理服务（不阻塞UI）
   // 读取jsProxyProvider以触发其初始化与自动脚本加载

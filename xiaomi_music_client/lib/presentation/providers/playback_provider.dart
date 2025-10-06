@@ -138,6 +138,9 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   // 保存服务器最后返回的原始进度，用于本地预测基准
   int? _lastServerOffset;
 
+  // 保护期：设备切换后在该时间窗内忽略非当前设备的远端更新
+  DateTime? _deviceSwitchProtectionUntil;
+
   // 🖼️ 封面图自动搜索相关
   final _searchService = NativeMusicSearchService();
   final Map<String, String> _coverCache = {}; // 歌曲名 -> 封面URL 的缓存
@@ -269,9 +272,14 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       }
 
       if (device.isLocalDevice) {
+        _deviceSwitchProtectionUntil = DateTime.now().add(const Duration(milliseconds: 1500));
         debugPrint('🎵 [PlaybackProvider] 切换到本地播放模式');
         final localStrategy = LocalPlaybackStrategy(apiService: apiService);
         _currentStrategy = localStrategy;
+
+        try {
+          await LocalPlaybackStrategy.handlerReady.timeout(const Duration(seconds: 2));
+        } catch (_) {}
 
         // 🎵 监听本地播放器状态流
         localStrategy.statusStream.listen((status) async {
@@ -282,6 +290,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
             isLoading: false,
           );
           await _saveLocalPlayback(status);
+          localStrategy.refreshNotification();
         });
 
         // 🔧 停止所有远程模式的定时器（本地模式不需要）
@@ -297,33 +306,72 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
         debugPrint('✅ [PlaybackProvider] 已清理远程模式的定时器和状态');
 
-        // 🔧 恢复缓存的播放状态（如果有）
-        if (_cachedMusicUrl != null && _cachedPlayingMusic != null) {
-          debugPrint('🔧 [PlaybackProvider] 恢复缓存的播放状态');
-          debugPrint('   - 准备恢复歌曲: ${_cachedPlayingMusic!.curMusic}');
-          debugPrint('   - URL: $_cachedMusicUrl');
-          debugPrint('   - 进度: ${_cachedOffset ?? 0}s');
+        // 🔧 从 SharedPreferences 重新加载缓存数据（因为从音箱切换回来时内存缓存可能已清空）
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final cachedUrl = prefs.getString(_localPlaybackUrlKey);
+          final cachedCover = prefs.getString(_localPlaybackCoverKey);
+          final jsonStr = prefs.getString(_localPlaybackKey);
 
-          await localStrategy.prepareFromCache(
-            url: _cachedMusicUrl!,
-            name: _cachedPlayingMusic!.curMusic,
-            offset: _cachedOffset ?? 0,
-          );
-          if (_cachedCoverUrl != null) {
-            updateAlbumCover(_cachedCoverUrl!);
+          PlayingMusic? cachedMusic;
+          int cachedOffset = 0;
+
+          if (jsonStr != null && jsonStr.isNotEmpty) {
+            final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+            cachedMusic = PlayingMusic(
+              ret: data['ret'] as String? ?? 'OK',
+              curMusic: data['curMusic'] as String? ?? '',
+              curPlaylist: (data['curPlaylist'] as String?) ?? '本地播放',
+              isPlaying: false, // 恢复时总是暂停状态
+              offset: data['offset'] as int? ?? 0,
+              duration: data['duration'] as int? ?? 0,
+            );
+            cachedOffset = cachedMusic.offset;
           }
-          // 清除缓存
-          _cachedMusicUrl = null;
-          _cachedPlayingMusic = null;
-          _cachedCoverUrl = null;
-          _cachedOffset = null;
-        } else {
-          debugPrint('⚠️ [PlaybackProvider] 无缓存数据可恢复');
-          debugPrint('   - _cachedMusicUrl: ${_cachedMusicUrl == null ? "null" : "有值"}');
-          debugPrint('   - _cachedPlayingMusic: ${_cachedPlayingMusic == null ? "null" : "有值"}');
+
+          // 🔧 恢复缓存的播放状态（如果有）
+          if (cachedUrl != null && cachedMusic != null && cachedUrl.isNotEmpty) {
+            debugPrint('🔧 [PlaybackProvider] 恢复本地播放缓存');
+            debugPrint('   - 歌曲: ${cachedMusic.curMusic}');
+            debugPrint('   - URL: $cachedUrl');
+            debugPrint('   - 进度: ${cachedOffset}s / ${cachedMusic.duration}s');
+
+            await localStrategy.prepareFromCache(
+              url: cachedUrl,
+              name: cachedMusic.curMusic,
+              offset: cachedOffset,
+            );
+
+            // 🎯 立即更新 UI 状态,避免等待 statusStream
+            state = state.copyWith(
+              currentMusic: cachedMusic,
+              hasLoaded: true,
+              isLoading: false,
+            );
+            debugPrint('✅ [PlaybackProvider] UI 状态已更新');
+            if (_currentStrategy is LocalPlaybackStrategy) {
+              (_currentStrategy as LocalPlaybackStrategy).refreshNotification();
+            }
+
+            if (cachedCover != null && cachedCover.isNotEmpty) {
+              updateAlbumCover(cachedCover);
+              debugPrint('✅ [PlaybackProvider] 封面已恢复');
+            }
+
+            if (_currentStrategy is LocalPlaybackStrategy) {
+              (_currentStrategy as LocalPlaybackStrategy).refreshNotification();
+            }
+          } else {
+            debugPrint('⚠️ [PlaybackProvider] 无本地播放缓存可恢复');
+            debugPrint('   - cachedUrl: ${cachedUrl ?? "null"}');
+            debugPrint('   - cachedMusic: ${cachedMusic?.curMusic ?? "null"}');
+          }
+        } catch (e) {
+          debugPrint('❌ [PlaybackProvider] 加载本地播放缓存失败: $e');
         }
       } else {
         debugPrint('🎵 [PlaybackProvider] 切换到远程控制模式 (设备: ${device.name})');
+        _deviceSwitchProtectionUntil = DateTime.now().add(const Duration(milliseconds: 1500));
         _currentStrategy = RemotePlaybackStrategy(
           apiService: apiService,
           deviceId: deviceId,
@@ -394,6 +442,12 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     }
 
     // 远程模式：从服务器获取状态
+    // 🔧 再次检查策略类型，防止延迟任务在切换后仍执行
+    if (_currentStrategy == null || _currentStrategy!.isLocalMode) {
+      debugPrint('🎵 [PlaybackProvider] 当前非远程模式，跳过远程状态刷新');
+      return;
+    }
+
     final apiService = ref.read(apiServiceProvider);
     final selectedDid = ref.read(deviceProvider).selectedDeviceId;
     if (apiService == null || selectedDid == null) {
@@ -419,6 +473,14 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         state = state.copyWith(isLoading: true);
       }
       print('🎵 正在获取播放状态...');
+
+      // 保护期过滤：如果处于保护期且当前策略为本地模式，直接忽略远端刷新
+      if (_deviceSwitchProtectionUntil != null &&
+          DateTime.now().isBefore(_deviceSwitchProtectionUntil!) &&
+          (_currentStrategy?.isLocalMode ?? false)) {
+        debugPrint('🛡️ [PlaybackProvider] 保护期内，忽略远端状态刷新');
+        return;
+      }
 
       // 直接使用播放状态API获取完整信息
       final currentPlayingResponse = await apiService.getCurrentPlaying(
@@ -506,6 +568,12 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       }
 
       // 🎯 如果歌曲切换，清除旧的封面图和收藏状态
+      // 🔧 在更新状态前再次检查，防止在异步等待期间策略已切换
+      if (_currentStrategy == null || _currentStrategy!.isLocalMode) {
+        debugPrint('🎵 [PlaybackProvider] 策略已切换到本地模式，放弃远程状态更新');
+        return;
+      }
+
       state = state.copyWith(
         currentMusic: currentMusic,
         volume: volume,
@@ -559,6 +627,12 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       // 🔧 只有远程模式需要启动进度定时器（本地模式通过statusStream自动更新）
       if (_currentStrategy != null && !_currentStrategy!.isLocalMode) {
         _startProgressTimer(currentMusic?.isPlaying ?? false);
+      }
+
+      // 保护期结束后清理标记
+      if (_deviceSwitchProtectionUntil != null &&
+          DateTime.now().isAfter(_deviceSwitchProtectionUntil!)) {
+        _deviceSwitchProtectionUntil = null;
       }
     } catch (e) {
       print('🎵 获取播放状态失败: $e');
@@ -1167,6 +1241,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       // 🎵 如果是本地播放模式，同时更新通知栏封面
       if (_currentStrategy is LocalPlaybackStrategy) {
         (_currentStrategy as LocalPlaybackStrategy).setAlbumCover(coverUrl);
+        (_currentStrategy as LocalPlaybackStrategy).refreshNotification();
       }
     }
   }
