@@ -132,7 +132,7 @@ class MyApp extends ConsumerWidget {
     ref.read(jsProxyProvider);
 
     return MaterialApp.router(
-      title: '小爱音乐盒',
+      title: 'HMusic',
       themeMode: ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
