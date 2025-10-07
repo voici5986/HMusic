@@ -271,60 +271,54 @@ class _MainPageState extends ConsumerState<MainPage> {
       ),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: onSurface.withOpacity(0.1), width: 1),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06), width: 1), // 更淡的边框
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
+            color: Colors.black.withValues(alpha: 0.04), // 更淡的阴影
             blurRadius: 24,
-            offset: const Offset(0, 12),
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
-        child: Stack(
-          children: [
-            BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface.withOpacity(0.7),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24), // 增强模糊
+          child: Container(
+            height: 68,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.20), // 更透明
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildTabItem(
+                  icon: Icons.play_circle_outline_rounded,
+                  activeIcon: Icons.play_circle_filled_rounded,
+                  label: '播放',
+                  index: 0,
                 ),
-              ),
+                _buildTabItem(
+                  icon: Icons.search_rounded,
+                  activeIcon: Icons.search_rounded,
+                  label: '搜索',
+                  index: 1,
+                ),
+                _buildTabItem(
+                  icon: Icons.playlist_play_outlined,
+                  activeIcon: Icons.playlist_play_rounded,
+                  label: '列表',
+                  index: 2,
+                ),
+                _buildTabItem(
+                  icon: Icons.library_music_outlined,
+                  activeIcon: Icons.library_music_rounded,
+                  label: '曲库',
+                  index: 3,
+                ),
+              ],
             ),
-            SizedBox(
-              height: 68,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildTabItem(
-                    icon: Icons.play_circle_outline_rounded,
-                    activeIcon: Icons.play_circle_filled_rounded,
-                    label: '播放',
-                    index: 0,
-                  ),
-                  _buildTabItem(
-                    icon: Icons.search_rounded,
-                    activeIcon: Icons.search_rounded,
-                    label: '搜索',
-                    index: 1,
-                  ),
-                  _buildTabItem(
-                    icon: Icons.playlist_play_outlined,
-                    activeIcon: Icons.playlist_play_rounded,
-                    label: '列表',
-                    index: 2,
-                  ),
-                  _buildTabItem(
-                    icon: Icons.library_music_outlined,
-                    activeIcon: Icons.library_music_rounded,
-                    label: '曲库',
-                    index: 3,
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -340,7 +334,7 @@ class _MainPageState extends ConsumerState<MainPage> {
     final activeColor = Theme.of(context).colorScheme.primary;
     final inactiveColor = Theme.of(
       context,
-    ).colorScheme.onSurface.withOpacity(0.7);
+    ).colorScheme.onSurface.withValues(alpha: 0.7);
 
     return Expanded(
       child: GestureDetector(
@@ -385,7 +379,7 @@ class _MainPageState extends ConsumerState<MainPage> {
     final playback = ref.watch(playbackProvider);
     final cover = playback.albumCoverUrl;
     final isPlaying = playback.currentMusic?.isPlaying ?? false;
-    final borderColor = (isSelected ? activeColor : inactiveColor).withOpacity(0.6);
+    final borderColor = (isSelected ? activeColor : inactiveColor).withValues(alpha: 0.6);
 
     // 计算播放进度 (0.0 - 1.0)
     final offset = playback.currentMusic?.offset ?? 0;
@@ -396,7 +390,7 @@ class _MainPageState extends ConsumerState<MainPage> {
       width: 26,
       height: 26,
       decoration: BoxDecoration(
-        color: inactiveColor.withOpacity(0.15),
+        color: inactiveColor.withValues(alpha: 0.15),
         shape: BoxShape.circle,
       ),
       child: Icon(
@@ -439,7 +433,7 @@ class _MainPageState extends ConsumerState<MainPage> {
           child: CircularProgressIndicator(
             value: progress,
             strokeWidth: 2.0,
-            backgroundColor: borderColor.withOpacity(0.2),
+            backgroundColor: borderColor.withValues(alpha: 0.2),
             valueColor: AlwaysStoppedAnimation<Color>(
               isSelected ? activeColor : inactiveColor,
             ),

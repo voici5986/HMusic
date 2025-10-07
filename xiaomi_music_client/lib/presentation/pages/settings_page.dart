@@ -160,6 +160,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 24),
 
+          // 关于分组
+          _buildSettingsGroup(
+            context,
+            title: '关于',
+            children: [
+              _buildAppInfo(context, onSurface),
+              _buildDeveloperInfo(context, onSurface),
+            ],
+          ),
+
+          const SizedBox(height: 24),
+
           // 账户操作
           _buildSettingsGroup(
             context,
@@ -174,18 +186,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 onSurface: onSurface,
                 iconColor: Colors.red.withOpacity(0.8),
               ),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          // 关于分组
-          _buildSettingsGroup(
-            context,
-            title: '关于',
-            children: [
-              _buildAppInfo(context, onSurface),
-              _buildDeveloperInfo(context, onSurface),
             ],
           ),
 

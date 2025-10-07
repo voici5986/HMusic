@@ -176,9 +176,11 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
           onTap: () => FocusScope.of(context).unfocus(),
           child: Column(
             children: [
-              const SizedBox(height: 20),
-              _buildHeader(onSurface),
-              const SizedBox(height: 16),
+              Transform.translate(
+                offset: const Offset(0, -4),
+                child: _buildHeader(onSurface),
+              ),
+              const SizedBox(height: 12),
               _buildStatistics(libraryState, onSurface),
               const SizedBox(height: 8),
               Expanded(child: _buildContent(libraryState)),
@@ -191,7 +193,7 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
 
   Widget _buildHeader(Color onSurface) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
       child: TextField(
         controller: _searchController,
         onChanged: _onSearchChanged,

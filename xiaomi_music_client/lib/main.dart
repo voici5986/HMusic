@@ -123,6 +123,7 @@ class MyApp extends ConsumerWidget {
       seedColor: seed,
       brightness: Brightness.light,
       primary: seed,
+      surface: Colors.white, // 纯白背景
     );
     final darkScheme = ColorScheme.fromSeed(
       seedColor: seed,
