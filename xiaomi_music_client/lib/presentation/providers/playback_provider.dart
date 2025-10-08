@@ -14,6 +14,7 @@ import '../../data/services/local_playback_strategy.dart';
 import '../../data/services/remote_playback_strategy.dart';
 import 'dio_provider.dart';
 import 'device_provider.dart';
+import 'music_library_provider.dart';
 
 // 用于区分"未传入参数"和"传入 null"
 const _undefined = Object();
@@ -386,6 +387,24 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         } catch (e) {
           debugPrint('❌ [PlaybackProvider] 加载本地播放缓存失败: $e');
         }
+
+        // 恢复本地播放列表
+        try {
+          final libraryState = ref.read(musicLibraryProvider);
+          if (libraryState.musicList.isNotEmpty) {
+            int startIndex = 0;
+            if (state.currentMusic != null) {
+              final idx = libraryState.musicList.indexWhere((m) => m.name == state.currentMusic!.curMusic);
+              if (idx >= 0) startIndex = idx;
+            }
+            localStrategy.setPlaylist(libraryState.musicList, startIndex: startIndex);
+            debugPrint('🎵 [PlaybackProvider] 已恢复本地播放列表: ${libraryState.musicList.length} 首');
+          } else {
+            debugPrint('⚠️ [PlaybackProvider] 音乐库为空，暂不设置本地播放列表');
+          }
+        } catch (e) {
+          debugPrint('❌ [PlaybackProvider] 恢复本地播放列表失败: $e');
+        }
       } else {
         debugPrint('🎵 [PlaybackProvider] 切换到远程控制模式 (设备: ${device.name})');
         _deviceSwitchProtectionUntil = DateTime.now().add(const Duration(milliseconds: 1500));
@@ -460,7 +479,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
               debugPrint('🖼️ [AutoCover] 异步搜索封面失败: $e');
             });
           } else {
-            debugPrint('🖼️ [PlaybackProvider-本地] ❌ 不需要搜索封面（已有封面或无歌曲）');
+            debugPrint('🖼️ [PlaybackProvider-本地] ℹ️ 不需要搜索封面（已有封面或无歌曲）');
           }
         }
       } catch (e) {
@@ -667,7 +686,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
           print('🖼️ [AutoCover] 异步搜索封面失败: $e');
         });
       } else {
-        debugPrint('🖼️ [PlaybackProvider] ❌ 不需要搜索封面（已有封面或无歌曲）');
+        debugPrint('🖼️ [PlaybackProvider] ℹ️ 不需要搜索封面（已有封面或无歌曲）');
       }
 
       // 🔧 只有远程模式需要启动进度定时器（本地模式通过statusStream自动更新）
