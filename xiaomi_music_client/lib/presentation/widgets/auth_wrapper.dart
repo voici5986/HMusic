@@ -7,6 +7,7 @@ import '../providers/auth_provider.dart';
 import '../providers/js_proxy_provider.dart';
 import '../providers/source_settings_provider.dart';
 import '../providers/js_script_manager_provider.dart';
+import '../providers/initialization_provider.dart';
 
 class AuthWrapper extends ConsumerStatefulWidget {
   const AuthWrapper({super.key});
@@ -17,6 +18,7 @@ class AuthWrapper extends ConsumerStatefulWidget {
 
 class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   bool _jsPreloadAttempted = false;
+  bool _isFirstFrame = true;
 
   @override
   void initState() {
@@ -24,8 +26,22 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
 
     // 使用postFrameCallback确保在第一帧渲染后执行
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isFirstFrame = false;
+      // 初始化 AudioService（后台执行，不阻塞UI）
+      _initializeAudioService();
       _attemptJsPreload();
     });
+  }
+
+  /// 初始化音频服务
+  Future<void> _initializeAudioService() async {
+    try {
+      final initNotifier = ref.read(initializationProvider.notifier);
+      await initNotifier.initialize();
+      // 初始化完成后,隐藏原生启动屏将在 initialize() 内部自动调用
+    } catch (e) {
+      print('[AuthWrapper] ❌ 音频服务初始化失败: $e');
+    }
   }
 
   /// 尝试预加载JS脚本（后台执行，不阻塞UI）
@@ -122,10 +138,7 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
 
     return switch (authState) {
       AuthAuthenticated() => const MainPage(),
-      AuthLoading() => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      ),
-      _ => const LoginPage(),
+      _ => const LoginPage(), // 其他所有状态都显示登录页
     };
   }
 }

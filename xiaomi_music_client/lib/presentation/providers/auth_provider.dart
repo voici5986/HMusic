@@ -47,15 +47,48 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       if (serverUrl != null && username != null && password != null) {
         debugPrint('尝试自动登录: $username@$serverUrl');
-        await login(
+        // 自动登录时不显示 Loading 状态，直接尝试登录
+        await _silentLogin(
           serverUrl: serverUrl,
           username: username,
           password: password,
-          saveCredentials: false, // 不重复保存
         );
       }
     } catch (e) {
       debugPrint('自动登录失败: $e');
+    }
+  }
+
+  /// 静默登录（不显示 Loading 状态）
+  Future<void> _silentLogin({
+    required String serverUrl,
+    required String username,
+    required String password,
+  }) async {
+    try {
+      String cleanUrl = serverUrl.trim();
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        cleanUrl = 'http://$cleanUrl';
+      }
+
+      final client = DioClient(
+        baseUrl: cleanUrl,
+        username: username,
+        password: password,
+      );
+
+      // 简单连通性校验
+      await client.get('/getversion');
+
+      state = AuthAuthenticated(
+        client: client,
+        serverUrl: cleanUrl,
+        username: username,
+      );
+    } catch (e) {
+      debugPrint('静默登录失败: $e');
+      // 失败时保持 AuthInitial 状态，显示登录页
+      state = const AuthInitial();
     }
   }
 

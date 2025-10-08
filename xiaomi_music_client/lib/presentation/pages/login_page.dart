@@ -119,6 +119,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           child: Image.asset(
                             'xiaoai_music_box_icon.png',
                             fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Icon(
+                                Icons.music_note_rounded,
+                                size: 50,
+                                color: isLight ? const Color(0xFF21B0A5) : Colors.white,
+                              );
+                            },
                           ),
                         ),
                       ),

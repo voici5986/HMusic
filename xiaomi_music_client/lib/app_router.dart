@@ -14,7 +14,7 @@ import 'presentation/pages/now_playing_page.dart';
 import 'presentation/pages/js_proxy_test_page.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  // 使用一个简单的根路由，内部由 AuthWrapper 判定跳转
+  // 直接从根路由开始，不使用额外的 Splash 页面
   return GoRouter(
     initialLocation: '/',
     routes: <RouteBase>[
