@@ -1,6 +1,6 @@
 class AppConstants {
-  static const String appName = '小爱音乐控制器';
-  static const String version = '1.0.0';
+  static const String appName = 'HMusic';
+  static const String version = '2.0.0';
 
   // 网络配置
   static const int connectTimeout = 20;
@@ -8,7 +8,7 @@ class AppConstants {
   static const int sendTimeout = 20;
 
   // 默认配置
-  static const String defaultServerUrl = 'http://192.168.31.2:58090';
+  static const String defaultServerUrl = 'http://192.168.31.2:8090';
 
   // SharedPreferences keys
   static const String prefsServerUrl = 'server_url';

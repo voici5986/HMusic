@@ -1,10 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
+import 'dart:async';
 import '../../data/models/music.dart';
 import '../../data/adapters/music_list_adapter.dart';
 import '../../data/services/music_api_service.dart';
+import 'auth_provider.dart';
 import 'dio_provider.dart';
 
 class MusicLibraryState {
@@ -13,6 +16,8 @@ class MusicLibraryState {
   final String? error;
   final String searchQuery;
   final List<Music> filteredMusicList;
+  final bool isSelectionMode;
+  final Set<String> selectedMusicNames;
 
   const MusicLibraryState({
     this.musicList = const [],
@@ -20,6 +25,8 @@ class MusicLibraryState {
     this.error,
     this.searchQuery = '',
     this.filteredMusicList = const [],
+    this.isSelectionMode = false,
+    this.selectedMusicNames = const {},
   });
 
   MusicLibraryState copyWith({
@@ -28,6 +35,8 @@ class MusicLibraryState {
     String? error,
     String? searchQuery,
     List<Music>? filteredMusicList,
+    bool? isSelectionMode,
+    Set<String>? selectedMusicNames,
   }) {
     return MusicLibraryState(
       musicList: musicList ?? this.musicList,
@@ -35,6 +44,8 @@ class MusicLibraryState {
       error: error,
       searchQuery: searchQuery ?? this.searchQuery,
       filteredMusicList: filteredMusicList ?? this.filteredMusicList,
+      isSelectionMode: isSelectionMode ?? this.isSelectionMode,
+      selectedMusicNames: selectedMusicNames ?? this.selectedMusicNames,
     );
   }
 }
@@ -43,20 +54,47 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
   final Ref ref;
 
   MusicLibraryNotifier(this.ref) : super(const MusicLibraryState()) {
-    _loadMusicLibrary();
+    debugPrint('MusicLibraryProvider: 初始化完成');
+    
+    // 监听认证状态变化，在用户登录后自动加载音乐库
+    ref.listen<AuthState>(authProvider, (previous, next) {
+      debugPrint('MusicLibraryProvider: 认证状态变化 - previous: ${previous.runtimeType}, next: ${next.runtimeType}');
+      
+      if (next is AuthAuthenticated && previous is! AuthAuthenticated) {
+        debugPrint('MusicLibraryProvider: 用户已认证，自动加载音乐库');
+        // 延迟一点时间确保认证完全完成
+        Future.delayed(const Duration(milliseconds: 800), () {
+          debugPrint('MusicLibraryProvider: 延迟后开始刷新音乐库');
+          refreshLibrary();
+        });
+      }
+      if (next is AuthInitial) {
+        debugPrint('MusicLibraryProvider: 用户登出，清空音乐库状态');
+        state = const MusicLibraryState();
+      }
+    });
   }
 
   Future<void> _loadMusicLibrary() async {
     final apiService = ref.read(apiServiceProvider);
-    if (apiService == null) return;
+    if (apiService == null) {
+      debugPrint('MusicLibrary: API服务未初始化');
+      return;
+    }
 
     try {
+      debugPrint('MusicLibrary: 开始加载音乐库');
       state = state.copyWith(isLoading: true);
 
       final response = await apiService.getMusicList();
+      debugPrint('MusicLibrary: API响应: $response');
+      
       final musicList = MusicListAdapter.parse(response);
-
-      print('解析后的音乐列表数量: ${musicList.length}');
+      debugPrint('MusicLibrary: 解析后的音乐列表数量: ${musicList.length}');
+      
+      if (musicList.isNotEmpty) {
+        debugPrint('MusicLibrary: 前5首歌曲: ${musicList.take(5).map((m) => m.name).toList()}');
+      }
 
       state = state.copyWith(
         musicList: musicList,
@@ -64,8 +102,10 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
         isLoading: false,
         error: null,
       );
+      
+      debugPrint('MusicLibrary: 数据加载完成，状态已更新');
     } catch (e) {
-      print('获取音乐列表失败: $e');
+      debugPrint('MusicLibrary: 获取音乐列表失败: $e');
       state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
@@ -142,8 +182,12 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
       );
       // 简单成功判断
       if (resp['ret'] == 'OK' || resp['success'] == true) {
-        // 下载一般是异步，稍后刷新库
-        await Future.delayed(const Duration(seconds: 1));
+        debugPrint('MusicLibrary: 下载请求成功，开始监测下载状态');
+        
+        // 使用智能下载状态监测
+        await _waitForDownloadCompletion(musicName, apiService);
+        
+        debugPrint('MusicLibrary: 下载监测完成，刷新音乐库');
         await refreshLibrary();
       } else {
         state = state.copyWith(isLoading: false, error: resp.toString());
@@ -151,6 +195,89 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }
+  }
+
+  // 异步下载 - 不阻塞UI，在后台监测完成状态
+  Future<void> downloadOneMusicAsync(String musicName, {String? url}) async {
+    final apiService = ref.read(apiServiceProvider);
+    if (apiService == null) return;
+    
+    try {
+      debugPrint('MusicLibrary: 开始异步下载: $musicName');
+      final resp = await apiService.downloadOneMusic(
+        musicName: musicName,
+        url: url,
+      );
+      
+      if (resp['ret'] == 'OK' || resp['success'] == true) {
+        debugPrint('MusicLibrary: 下载请求成功，启动后台监测');
+        
+        // 在后台监测下载完成状态，不阻塞当前操作
+        _backgroundDownloadMonitor(musicName, apiService);
+      } else {
+        debugPrint('MusicLibrary: 下载请求失败: ${resp.toString()}');
+      }
+    } catch (e) {
+      debugPrint('MusicLibrary: 异步下载异常: $e');
+    }
+  }
+
+  // 后台监测下载完成状态
+  void _backgroundDownloadMonitor(String musicName, dynamic apiService) {
+    // 使用unawaited让这个监测在后台运行，不阻塞其他操作
+    unawaited(_waitForDownloadCompletion(musicName, apiService).then((_) {
+      debugPrint('MusicLibrary: 后台监测完成，刷新音乐库');
+      refreshLibrary();
+    }));
+  }
+
+  /// 智能监测下载完成状态
+  Future<void> _waitForDownloadCompletion(String musicName, dynamic apiService) async {
+    const maxAttempts = 30; // 最多等待3分钟 (6秒 * 30)
+    int attempts = 0;
+    
+    while (attempts < maxAttempts) {
+      attempts++;
+      
+      try {
+        // 方法1: 检查音乐库中是否已有该音乐
+        final currentResponse = await apiService.getMusicList();
+        final currentMusicList = MusicListAdapter.parse(currentResponse);
+        
+        final foundMusic = currentMusicList.any((music) =>
+            music.name == musicName ||
+            music.name.contains(musicName.split(' - ').first) ||
+            (music.title != null && music.title!.contains(musicName.split(' - ').first)));
+            
+        if (foundMusic) {
+          debugPrint('MusicLibrary: 下载完成检测成功 (第${attempts}次检查)');
+          return;
+        }
+        
+        // 方法2: 尝试获取下载日志检查状态 (如果API支持)
+        try {
+          final downloadLog = await apiService.getDownloadLog();
+          if (downloadLog.contains(musicName) && 
+              (downloadLog.contains('完成') || 
+               downloadLog.contains('success') || 
+               downloadLog.contains('下载成功'))) {
+            debugPrint('MusicLibrary: 通过下载日志检测到完成 (第${attempts}次检查)');
+            return;
+          }
+        } catch (e) {
+          debugPrint('MusicLibrary: 下载日志检查失败: $e');
+        }
+        
+        debugPrint('MusicLibrary: 第${attempts}次检查未完成，等待6秒后重试');
+        await Future.delayed(const Duration(seconds: 6));
+        
+      } catch (e) {
+        debugPrint('MusicLibrary: 下载状态检查异常: $e');
+        await Future.delayed(const Duration(seconds: 6));
+      }
+    }
+    
+    debugPrint('MusicLibrary: 下载监测超时，可能下载仍在进行中');
   }
 
   // 上传多个音乐文件
@@ -269,6 +396,68 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
 
   void clearError() {
     state = state.copyWith(error: null);
+  }
+
+  // 批量删除相关方法
+  void toggleSelectionMode() {
+    state = state.copyWith(
+      isSelectionMode: !state.isSelectionMode,
+      selectedMusicNames: {},
+    );
+  }
+
+  void toggleMusicSelection(String musicName) {
+    final selected = Set<String>.from(state.selectedMusicNames);
+    if (selected.contains(musicName)) {
+      selected.remove(musicName);
+    } else {
+      selected.add(musicName);
+    }
+    state = state.copyWith(selectedMusicNames: selected);
+  }
+
+  void selectAllMusic() {
+    final allNames = state.filteredMusicList.map((music) => music.name).toSet();
+    state = state.copyWith(selectedMusicNames: allNames);
+  }
+
+  void clearSelection() {
+    state = state.copyWith(selectedMusicNames: {});
+  }
+
+  Future<void> deleteSelectedMusic() async {
+    if (state.selectedMusicNames.isEmpty) return;
+
+    final apiService = ref.read(apiServiceProvider);
+    if (apiService == null) return;
+
+    try {
+      state = state.copyWith(isLoading: true);
+
+      // 批量删除音乐文件
+      for (final musicName in state.selectedMusicNames) {
+        await apiService.deleteMusic(musicName);
+      }
+
+      // 从本地列表中移除被删除的音乐
+      final updatedList = state.musicList
+          .where((music) => !state.selectedMusicNames.contains(music.name))
+          .toList();
+
+      final updatedFilteredList = state.filteredMusicList
+          .where((music) => !state.selectedMusicNames.contains(music.name))
+          .toList();
+
+      state = state.copyWith(
+        musicList: updatedList,
+        filteredMusicList: updatedFilteredList,
+        isLoading: false,
+        isSelectionMode: false,
+        selectedMusicNames: {},
+      );
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: e.toString());
+    }
   }
 }
 

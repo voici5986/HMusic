@@ -1,7 +1,10 @@
 import '../../core/network/dio_client.dart';
 import 'package:dio/dio.dart';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import '../../core/constants/app_constants.dart';
+import '../adapters/music_list_json_adapter.dart';
+import '../models/online_music_result.dart';
 
 class UploadFile {
   final String fieldName;
@@ -33,6 +36,15 @@ class MusicApiService {
     return response.data as Map<String, dynamic>;
   }
 
+  // 获取当前播放列表
+  Future<Map<String, dynamic>> getCurrentPlaylist({String? did}) async {
+    final response = await _client.get(
+      '/curplaylist',
+      queryParameters: did != null ? {'did': did} : null,
+    );
+    return response.data as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> getVolume({String? did}) async {
     final response = await _client.get(
       '/getvolume',
@@ -55,13 +67,10 @@ class MusicApiService {
     String? musicName,
     String? searchKey,
   }) async {
-    await _client.post(
-      '/playmusic',
-      data: {
-        'did': did,
-        'musicname': musicName ?? '',
-        'searchkey': searchKey ?? '',
-      },
+    await playMusicList(
+      did: did,
+      listName: "临时搜索列表",
+      musicName: musicName ?? '',
     );
   }
 
@@ -70,7 +79,7 @@ class MusicApiService {
   }
 
   Future<void> resumeMusic({required String did}) async {
-    await _client.post('/cmd', data: {'did': did, 'cmd': '播放'});
+    await _client.post('/cmd', data: {'did': did, 'cmd': '播放歌曲'});
   }
 
   Future<void> shutdown({required String did}) async {
@@ -97,6 +106,136 @@ class MusicApiService {
       queryParameters: {'need_device_list': needDeviceList},
     );
     return response.data as Map<String, dynamic>;
+  }
+
+  // 保存设置接口
+  Future<dynamic> saveSetting(Map<String, dynamic> settings) async {
+    final response = await _client.post('/savesetting', data: settings);
+    return response.data; // 直接返回原始数据，可能是字符串或Map
+  }
+
+  // 播放音乐列表接口
+  Future<dynamic> playMusicList({
+    required String did,
+    required String listName,
+    required String musicName,
+  }) async {
+    final response = await _client.post(
+      '/playmusiclist',
+      data: {'did': did, 'listname': listName, 'musicname': musicName},
+    );
+    return response.data; // 直接返回原始数据，可能是字符串或Map
+  }
+
+  // 通过设置在线播放列表来播放音乐（兼容旧版本）
+  Future<void> playOnlineMusic({
+    required String did,
+    required String musicUrl,
+    required String musicTitle,
+    required String musicAuthor,
+    Map<String, String>? headers,
+  }) async {
+    // 使用新的适配器创建单首歌曲JSON
+    final musicListJsonString = MusicListJsonAdapter.createSingleSongJson(
+      title: musicTitle,
+      artist: musicAuthor,
+      url: musicUrl,
+      headers: headers,
+    );
+
+    debugPrint('🔵 完整的音乐列表JSON: $musicListJsonString');
+
+    // 获取当前设置，然后更新音乐列表
+    final currentSettings = await getSettings();
+    final updatedSettings = Map<String, dynamic>.from(currentSettings);
+    updatedSettings['music_list_json'] = musicListJsonString;
+
+    // 保存设置
+    final saveResult = await saveSetting(updatedSettings);
+    debugPrint('保存设置结果: $saveResult');
+
+    // 播放音乐
+    final playResult = await playMusicList(
+      did: did,
+      listName: "在线播放",
+      musicName: "$musicTitle - $musicAuthor",
+    );
+    debugPrint('播放结果: $playResult');
+  }
+
+  /// 播放在线搜索结果（支持多种格式）
+  ///
+  /// 这是新的通用方法，支持：
+  /// - OnlineMusicResult 对象
+  /// - 原始搜索结果JSON
+  /// - 多首歌曲的播放列表
+  Future<void> playOnlineSearchResult({
+    required String did,
+    OnlineMusicResult? singleResult,
+    List<OnlineMusicResult>? resultList,
+    List<Map<String, dynamic>>? rawResults,
+    String playlistName = "在线播放",
+    Map<String, String>? defaultHeaders,
+  }) async {
+    String musicListJsonString;
+    String targetSongName = "";
+
+    if (singleResult != null) {
+      // 播放单首歌曲
+      musicListJsonString = MusicListJsonAdapter.convertToMusicListJson(
+        results: [singleResult],
+        playlistName: playlistName,
+        defaultHeaders: defaultHeaders,
+      );
+      targetSongName = "${singleResult.title} - ${singleResult.author}";
+    } else if (resultList != null && resultList.isNotEmpty) {
+      // 播放结果列表，默认播放第一首
+      musicListJsonString = MusicListJsonAdapter.convertToMusicListJson(
+        results: resultList,
+        playlistName: playlistName,
+        defaultHeaders: defaultHeaders,
+      );
+      targetSongName = "${resultList.first.title} - ${resultList.first.author}";
+    } else if (rawResults != null && rawResults.isNotEmpty) {
+      // 播放原始JSON结果
+      musicListJsonString = MusicListJsonAdapter.convertFromRawJson(
+        rawResults: rawResults,
+        playlistName: playlistName,
+        defaultHeaders: defaultHeaders,
+      );
+      // 从原始数据中提取歌曲名
+      final firstResult = rawResults.first;
+      final title = firstResult['title'] ?? firstResult['name'] ?? '未知标题';
+      final artist = firstResult['artist'] ?? firstResult['singer'] ?? '未知艺术家';
+      targetSongName = "$title - $artist";
+    } else {
+      throw ArgumentError('必须提供 singleResult、resultList 或 rawResults 中的至少一个参数');
+    }
+
+    debugPrint('🔵 [PlayOnlineSearchResult] 完整的音乐列表JSON: $musicListJsonString');
+    debugPrint('🔵 [PlayOnlineSearchResult] 目标歌曲: $targetSongName');
+
+    // 验证生成的JSON格式
+    if (!MusicListJsonAdapter.validateMusicListJson(musicListJsonString)) {
+      throw FormatException('生成的music_list_json格式无效');
+    }
+
+    // 获取当前设置，然后更新音乐列表
+    final currentSettings = await getSettings();
+    final updatedSettings = Map<String, dynamic>.from(currentSettings);
+    updatedSettings['music_list_json'] = musicListJsonString;
+
+    // 保存设置
+    final saveResult = await saveSetting(updatedSettings);
+    debugPrint('🔵 [PlayOnlineSearchResult] 保存设置结果: $saveResult');
+
+    // 播放音乐
+    final playResult = await playMusicList(
+      did: did,
+      listName: playlistName,
+      musicName: targetSongName,
+    );
+    debugPrint('🔵 [PlayOnlineSearchResult] 播放结果: $playResult');
   }
 
   Future<List<dynamic>> searchMusic(String name) async {
@@ -184,6 +323,55 @@ class MusicApiService {
     await _client.get('/playurl', queryParameters: {'did': did, 'url': url});
   }
 
+  // 代理播放 - 用于需要代理的链接
+  Future<void> playUrlWithProxy({
+    required String did,
+    required String url,
+  }) async {
+    // 构建完整的代理URL
+    final baseUrl = _client.baseUrl;
+    final proxyUrl = '$baseUrl/proxy?urlb64=${_encodeUrlToBase64(url)}';
+    debugPrint('构建代理URL: $proxyUrl');
+    await _client.get(
+      '/playurl',
+      queryParameters: {'did': did, 'url': proxyUrl},
+    );
+  }
+
+  // 智能播放 - 自动判断是否需要代理
+  Future<void> playUrlSmart({required String did, required String url}) async {
+    if (_needsProxy(url)) {
+      debugPrint('使用代理播放: $url');
+      await playUrlWithProxy(did: did, url: url);
+    } else {
+      debugPrint('直接播放: $url');
+      await playUrl(did: did, url: url);
+    }
+  }
+
+  // 判断URL是否需要代理
+  bool _needsProxy(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+
+    // 需要代理的域名列表
+    const proxyDomains = [
+      'ws.stream.qqmusic.qq.com', // QQ音乐
+      'music.163.com', // 网易云音乐
+      'freetyst.nf.migu.cn', // 咪咕音乐
+      'antiserver.kuwo.cn', // 酷我音乐
+      'fs.taihe.com', // 百度音乐
+      // 可以根据需要添加更多需要代理的域名
+    ];
+
+    return proxyDomains.any((domain) => uri.host.contains(domain));
+  }
+
+  // Base64编码URL
+  String _encodeUrlToBase64(String url) {
+    return base64Encode(utf8.encode(url));
+  }
+
   Future<void> playTts({required String did, required String text}) async {
     await _client.get('/playtts', queryParameters: {'did': did, 'text': text});
   }
@@ -239,21 +427,6 @@ class MusicApiService {
       queryParameters: {'name': playlistName},
     );
     return response.data as Map<String, dynamic>;
-  }
-
-  Future<void> playMusicList({
-    required String deviceId,
-    required String playlistName,
-    String? musicName,
-  }) async {
-    await _client.post(
-      '/playmusiclist',
-      data: {
-        'did': deviceId,
-        'listname': playlistName,
-        'musicname': musicName ?? '',
-      },
-    );
   }
 
   Future<void> createPlaylist(String name) async {

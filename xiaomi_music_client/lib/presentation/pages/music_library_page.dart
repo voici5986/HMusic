@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets/app_snackbar.dart';
 import '../providers/music_library_provider.dart';
@@ -34,6 +35,16 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
 
     // 启动列表动画
     _listAnimationController.forward();
+    
+    // 手动触发音乐库加载作为临时解决方案
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 检查音乐库是否为空且没有正在加载
+      final libraryState = ref.read(musicLibraryProvider);
+      if (libraryState.musicList.isEmpty && !libraryState.isLoading) {
+        debugPrint('MusicLibraryPage: 手动触发音乐库加载');
+        ref.read(musicLibraryProvider.notifier).refreshLibrary();
+      }
+    });
   }
 
   @override
@@ -50,19 +61,35 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
     setState(() {});
   }
 
+  void _clearSearch() {
+    _searchController.clear();
+    ref.read(musicLibraryProvider.notifier).filterMusic('');
+    // 刷新音乐库，显示全部歌曲
+    ref.read(musicLibraryProvider.notifier).refreshLibrary();
+    setState(() {});
+  }
+
   void _playMusic(String musicName) async {
     final selectedDid = ref.read(deviceProvider).selectedDeviceId;
     if (selectedDid == null) {
       if (mounted) {
-        AppSnackBar.showText(context, '请先在控制页选择播放设备');
+        AppSnackBar.showText(context, '请先在设置中配置 NAS 服务器');
       }
       return;
     }
 
     try {
-      await ref
-          .read(playbackProvider.notifier)
-          .playMusic(deviceId: selectedDid, musicName: musicName);
+      // 🎵 获取当前的音乐列表（用于本地播放的上一曲/下一曲功能）
+      final libraryState = ref.read(musicLibraryProvider);
+      final playlist = libraryState.searchQuery.isEmpty
+          ? libraryState.musicList
+          : libraryState.filteredMusicList;
+
+      await ref.read(playbackProvider.notifier).playMusic(
+            deviceId: selectedDid,
+            musicName: musicName,
+            playlist: playlist, // 🎵 传递播放列表
+          );
 
       if (mounted) {
         AppSnackBar.show(
@@ -86,45 +113,43 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
     }
   }
 
-  // 设备选择由控制面板统一处理，此处不再弹窗
+  // NAS 播放以本地为主，设备选择逻辑移除
 
   void _deleteMusic(String musicName) {
+    final primary = Theme.of(context).colorScheme.primary;
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            backgroundColor: const Color(0xFF1C1C1E),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Text('删除音乐', style: TextStyle(color: Colors.black87)),
+        content: const Text(
+          '确定要删除该音乐吗？此操作不可撤销。',
+          style: TextStyle(color: Colors.black54),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              '取消',
+              style: TextStyle(color: primary),
             ),
-            title: const Text('删除音乐', style: TextStyle(color: Colors.white)),
-            content: Text(
-              '确定要删除"$musicName"吗？此操作不可撤销。',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  '取消',
-                  style: TextStyle(color: Color(0xFF667EEA)),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  ref
-                      .read(musicLibraryProvider.notifier)
-                      .deleteMusic(musicName);
-                  Navigator.pop(context);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('删除'),
-              ),
-            ],
           ),
+          ElevatedButton(
+            onPressed: () {
+              ref.read(musicLibraryProvider.notifier).deleteMusic(musicName);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -137,6 +162,12 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
       key: const ValueKey('music_library_scaffold'),
       resizeToAvoidBottomInset: false,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      floatingActionButton:
+          libraryState.isSelectionMode &&
+                  libraryState.selectedMusicNames.isNotEmpty
+              ? _buildFloatingDeleteButton(libraryState)
+              : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: RefreshIndicator(
         key: const ValueKey('music_library_refresh'),
         onRefresh: () async {
@@ -151,9 +182,11 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
           onTap: () => FocusScope.of(context).unfocus(),
           child: Column(
             children: [
-              const SizedBox(height: 20),
-              _buildHeader(onSurface),
-              const SizedBox(height: 16),
+              Transform.translate(
+                offset: const Offset(0, -4),
+                child: _buildHeader(onSurface),
+              ),
+              const SizedBox(height: 12),
               _buildStatistics(libraryState, onSurface),
               const SizedBox(height: 8),
               Expanded(child: _buildContent(libraryState)),
@@ -166,112 +199,39 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
 
   Widget _buildHeader(Color onSurface) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
-        children: [
-          // 音乐库图标
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Theme.of(context).colorScheme.primary,
-                  Theme.of(context).colorScheme.primary.withOpacity(0.8),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              Icons.library_music_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+      child: TextField(
+        controller: _searchController,
+        onChanged: _onSearchChanged,
+        style: TextStyle(color: onSurface),
+        decoration: InputDecoration(
+          hintText: '搜索本地音乐...',
+          hintStyle: TextStyle(color: onSurface.withOpacity(0.5)),
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            color: onSurface.withOpacity(0.6),
           ),
-          const SizedBox(width: 12),
-
-          // 搜索框
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: onSurface.withOpacity(0.1), width: 1),
-              ),
-              child: TextField(
-                controller: _searchController,
-                onChanged: _onSearchChanged,
-                style: TextStyle(
-                  color: onSurface,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
-                decoration: InputDecoration(
-                  hintText: '搜索本地音乐...',
-                  hintStyle: TextStyle(
-                    color: onSurface.withOpacity(0.5),
-                    fontSize: 16,
-                  ),
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    color: onSurface.withOpacity(0.6),
-                    size: 22,
-                  ),
-                  suffixIcon:
-                      _searchController.text.isNotEmpty
-                          ? IconButton(
-                            icon: Icon(
-                              Icons.clear_rounded,
-                              color: onSurface.withOpacity(0.6),
-                              size: 20,
-                            ),
-                            onPressed: () {
-                              _searchController.clear();
-                              ref
-                                  .read(musicLibraryProvider.notifier)
-                                  .filterMusic('');
-                              setState(() {});
-                            },
-                          )
-                          : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-            ),
+          suffixIcon:
+              _searchController.text.isNotEmpty
+                  ? IconButton(
+                    icon: Icon(
+                      Icons.clear_rounded,
+                      color: onSurface.withOpacity(0.6),
+                    ),
+                    onPressed: _clearSearch,
+                  )
+                  : null,
+          filled: true,
+          fillColor: onSurface.withOpacity(0.05),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16.0),
+            borderSide: BorderSide.none,
           ),
-
-          const SizedBox(width: 12),
-
-          // 刷新按钮
-          Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: onSurface.withOpacity(0.1), width: 1),
-            ),
-            child: IconButton(
-              icon: RotationTransition(
-                turns: _refreshController,
-                child: Icon(
-                  Icons.refresh_rounded,
-                  color: onSurface.withOpacity(0.7),
-                  size: 22,
-                ),
-              ),
-              onPressed: () {
-                _refreshController.repeat();
-                ref.read(musicLibraryProvider.notifier).refreshLibrary().then((
-                  _,
-                ) {
-                  _refreshController.reset();
-                });
-              },
-            ),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 8,
+            horizontal: 16,
           ),
-        ],
+        ),
       ),
     );
   }
@@ -282,6 +242,12 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
       return const SizedBox.shrink();
     }
 
+    // 选择模式下显示选择状态栏
+    if (libraryState.isSelectionMode) {
+      return _buildSelectionBar(libraryState, onSurface);
+    }
+
+    // 普通模式下显示统计信息
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -324,7 +290,126 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
               style: TextStyle(color: onSurface.withOpacity(0.6), fontSize: 13),
             ),
           ],
+
+          const Spacer(),
+
+          // 批量选择按钮
+          if (libraryState.filteredMusicList.isNotEmpty)
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: onSurface.withOpacity(0.1), width: 1),
+              ),
+              child: IconButton(
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  Icons.checklist_rounded,
+                  color: onSurface.withOpacity(0.7),
+                  size: 18,
+                ),
+                onPressed: () {
+                  ref.read(musicLibraryProvider.notifier).toggleSelectionMode();
+                },
+                tooltip: '批量选择',
+              ),
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSelectionBar(MusicLibraryState libraryState, Color onSurface) {
+    final isAllSelected =
+        libraryState.selectedMusicNames.length ==
+            libraryState.filteredMusicList.length &&
+        libraryState.filteredMusicList.isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).colorScheme.outline.withOpacity(0.1),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          // 全选按钮
+          GestureDetector(
+            onTap: () {
+              if (isAllSelected) {
+                ref.read(musicLibraryProvider.notifier).clearSelection();
+              } else {
+                ref.read(musicLibraryProvider.notifier).selectAllMusic();
+              }
+            },
+            child: Text(
+              '全选',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+          const Spacer(),
+
+          // 选中数量显示
+          Text(
+            '已选中 ${libraryState.selectedMusicNames.length} 项',
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+
+          const Spacer(),
+
+          // 关闭按钮
+          GestureDetector(
+            onTap: () {
+              ref.read(musicLibraryProvider.notifier).toggleSelectionMode();
+            },
+            child: Icon(
+              Icons.close,
+              color: onSurface.withOpacity(0.7),
+              size: 24,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloatingDeleteButton(MusicLibraryState libraryState) {
+    return Container(
+      margin: const EdgeInsets.only(
+        bottom: 120, // 向上移动更多，避免遮挡最后一个选择框
+        right: 56, // 调整位置使按钮中心与选择框中心对齐
+      ),
+      child: FloatingActionButton(
+        onPressed: () => _showBatchDeleteDialog(libraryState),
+        backgroundColor: Colors.red,
+        foregroundColor: Colors.white,
+        elevation: 6,
+        heroTag: "delete_fab",
+        child: Badge(
+          label: Text(
+            '${libraryState.selectedMusicNames.length}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          backgroundColor: Colors.red.shade800,
+          child: const Icon(Icons.delete, size: 24),
+        ),
       ),
     );
   }
@@ -343,7 +428,7 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
         libraryState.searchQuery.isNotEmpty) {
       return _buildNoResultsState();
     }
-    return _buildMusicList(libraryState.filteredMusicList);
+    return _buildMusicList(libraryState.filteredMusicList, libraryState);
   }
 
   Widget _buildLoadingIndicator() {
@@ -414,33 +499,30 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
     final onSurface = Theme.of(context).colorScheme.onSurface;
     return Center(
       key: const ValueKey('music_library_empty'),
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.library_music_outlined,
-              size: 100,
-              color: onSurface.withOpacity(0.3),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.library_music_outlined,
+            size: 80,
+            color: onSurface.withOpacity(0.3),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '音乐库为空',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: onSurface.withOpacity(0.8),
             ),
-            const SizedBox(height: 24),
-            Text(
-              '音乐库为空',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-                color: onSurface,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '尚未找到任何音乐文件\n请先添加音乐到您的设备',
-              style: TextStyle(fontSize: 16, color: onSurface.withOpacity(0.6)),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '尚未找到任何音乐文件\n请先添加音乐到您的设备',
+            style: TextStyle(fontSize: 16, color: onSurface.withOpacity(0.6)),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
@@ -489,7 +571,10 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
     );
   }
 
-  Widget _buildMusicList(List<dynamic> musicList) {
+  Widget _buildMusicList(
+    List<dynamic> musicList,
+    MusicLibraryState libraryState,
+  ) {
     return FadeTransition(
       key: const ValueKey('music_library_list'),
       opacity: _listAnimationController,
@@ -529,9 +614,20 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
               ),
               child: MusicListItem(
                 music: music,
-                onTap: () => _playMusic(music.name),
+                onTap: () {
+                  if (libraryState.isSelectionMode) {
+                    ref
+                        .read(musicLibraryProvider.notifier)
+                        .toggleMusicSelection(music.name);
+                  } else {
+                    _playMusic(music.name);
+                  }
+                },
                 onPlay: () => _playMusic(music.name),
-                trailing: _buildMusicItemMenu(music),
+                trailing:
+                    libraryState.isSelectionMode
+                        ? _buildSelectionCheckbox(music, libraryState)
+                        : _buildMusicItemMenu(music),
               ),
             ),
           );
@@ -612,105 +708,194 @@ class _MusicLibraryPageState extends ConsumerState<MusicLibraryPage>
     );
   }
 
-  void _showMusicInfo(music) {
+  Widget _buildSelectionCheckbox(
+    dynamic music,
+    MusicLibraryState libraryState,
+  ) {
+    final isSelected = libraryState.selectedMusicNames.contains(music.name);
+    return Container(
+      padding: const EdgeInsets.all(8),
+      child: Checkbox(
+        value: isSelected,
+        onChanged: (value) {
+          ref
+              .read(musicLibraryProvider.notifier)
+              .toggleMusicSelection(music.name);
+        },
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+      ),
+    );
+  }
+
+  void _showBatchDeleteDialog(MusicLibraryState libraryState) {
+    final primary = Theme.of(context).colorScheme.primary;
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            backgroundColor: const Color(0xFF1C1C1E),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Text('批量删除音乐', style: TextStyle(color: Colors.black87)),
+        content: Text(
+          '确定要删除选中的 ${libraryState.selectedMusicNames.length} 首音乐吗？\n\n此操作不可撤销。',
+          style: const TextStyle(color: Colors.black54),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              '取消',
+              style: TextStyle(color: primary),
             ),
-            title: Text(
-              music.title ?? music.name,
-              style: const TextStyle(color: Colors.white),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await ref.read(musicLibraryProvider.notifier).deleteSelectedMusic();
+              if (mounted) {
+                AppSnackBar.show(
+                  context,
+                  SnackBar(
+                    content: Text('已删除 ${libraryState.selectedMusicNames.length} 首音乐'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMusicInfo(music) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final primary = Theme.of(context).colorScheme.primary;
+    final ext = music.name.contains('.') ? music.name.split('.').last : '未知';
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          music.title ?? music.name,
+          style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w600),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (music.artist != null)
+              Row(
+                children: [
+                  Icon(Icons.person_rounded, color: primary, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      music.artist!,
+                      style: TextStyle(color: Colors.black54),
+                    ),
+                  ),
+                ],
+              ),
+            if (music.artist != null) const SizedBox(height: 8),
+            if (music.album != null)
+              Row(
+                children: [
+                  Icon(Icons.album_rounded, color: primary, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      music.album!,
+                      style: TextStyle(color: Colors.black54),
+                    ),
+                  ),
+                ],
+              ),
+            if (music.album != null) const SizedBox(height: 8),
+            if (music.duration != null)
+              Row(
+                children: [
+                  Icon(Icons.access_time_rounded, color: primary, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      music.duration!,
+                      style: TextStyle(color: Colors.black54),
+                    ),
+                  ),
+                ],
+              ),
+            if (music.duration != null) const SizedBox(height: 8),
+            Row(
               children: [
-                if (music.artist != null) ...[
-                  const Text(
-                    '艺术家:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
+                Icon(Icons.insert_drive_file_rounded, color: primary, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    music.name,
+                    style: TextStyle(color: Colors.black87),
                   ),
-                  Text(
-                    music.artist!,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                if (music.album != null) ...[
-                  const Text(
-                    '专辑:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  Text(
-                    music.album!,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                if (music.duration != null) ...[
-                  const Text(
-                    '时长:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  Text(
-                    music.duration!,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                const Text(
-                  '文件名:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                Text(
-                  music.name,
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.8)),
                 ),
               ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text(
-                  '关闭',
-                  style: TextStyle(color: Color(0xFF667EEA)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.tag_rounded, color: primary, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '后缀: $ext',
+                    style: TextStyle(color: Colors.black54),
+                  ),
                 ),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _playMusic(music.name);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF667EEA),
-                  foregroundColor: Colors.white,
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.folder_rounded, color: primary, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '文件路径: 未提供',
+                    style: TextStyle(color: Colors.black45),
+                  ),
                 ),
-                child: const Text('播放'),
-              ),
-            ],
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              '关闭',
+              style: TextStyle(color: primary),
+            ),
           ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _playMusic(music.name);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('播放'),
+          ),
+        ],
+      ),
     );
   }
 }

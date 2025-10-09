@@ -8,6 +8,9 @@ class DioClient {
   late final Dio _dio;
   final String _baseUrl;
 
+  // 公共getter，供其他类访问baseUrl
+  String get baseUrl => _baseUrl;
+
   DioClient({
     required String baseUrl,
     required String username,
@@ -37,7 +40,7 @@ class DioClient {
             print('🔵 查询参数: ${options.queryParameters}');
           }
           if (options.data != null) {
-            print('🔵 请求体: ${options.data}');
+            print('🔵 请求体完整数据: ${options.data}');
           }
           handler.next(options);
         },

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_constants.dart';
@@ -45,15 +46,49 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final password = prefs.getString(AppConstants.prefsPassword);
 
       if (serverUrl != null && username != null && password != null) {
-        await login(
+        debugPrint('尝试自动登录: $username@$serverUrl');
+        // 自动登录时不显示 Loading 状态，直接尝试登录
+        await _silentLogin(
           serverUrl: serverUrl,
           username: username,
           password: password,
-          saveCredentials: false,
         );
       }
     } catch (e) {
-      // 如果自动登录失败，保持初始状态
+      debugPrint('自动登录失败: $e');
+    }
+  }
+
+  /// 静默登录（不显示 Loading 状态）
+  Future<void> _silentLogin({
+    required String serverUrl,
+    required String username,
+    required String password,
+  }) async {
+    try {
+      String cleanUrl = serverUrl.trim();
+      if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+        cleanUrl = 'http://$cleanUrl';
+      }
+
+      final client = DioClient(
+        baseUrl: cleanUrl,
+        username: username,
+        password: password,
+      );
+
+      // 简单连通性校验
+      await client.get('/getversion');
+
+      state = AuthAuthenticated(
+        client: client,
+        serverUrl: cleanUrl,
+        username: username,
+      );
+    } catch (e) {
+      debugPrint('静默登录失败: $e');
+      // 失败时保持 AuthInitial 状态，显示登录页
+      state = const AuthInitial();
     }
   }
 

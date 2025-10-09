@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:palette_generator/palette_generator.dart';
 import '../providers/playback_provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../providers/auth_provider.dart';
 import '../providers/device_provider.dart';
 import '../../data/models/device.dart';
-import '../widgets/app_snackbar.dart';
 import '../widgets/app_layout.dart';
-import '../providers/dio_provider.dart'; // Added for TTS
 
 class ControlPanelPage extends ConsumerStatefulWidget {
   final bool showAppBar;
@@ -22,6 +22,8 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
     with TickerProviderStateMixin {
   AnimationController? _albumAnimationController;
   AnimationController? _buttonAnimationController;
+  Color? _dominantColor; // 封面主色调
+  String? _lastCoverUrl; // 上一次的封面 URL
 
   @override
   void initState() {
@@ -37,12 +39,17 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
       vsync: this,
     );
 
-    // 延迟初始化以避免阻塞UI
-    Future.delayed(const Duration(milliseconds: 500), () {
+    // 🎯 优化：立即开始加载，避免延迟造成的割裂感
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         try {
-          ref.read(deviceProvider.notifier).loadDevices();
-          ref.read(playbackProvider.notifier).ensureInitialized();
+          final authState = ref.read(authProvider);
+          if (authState is AuthAuthenticated) {
+            ref.read(deviceProvider.notifier).loadDevices();
+            ref.read(playbackProvider.notifier).ensureInitialized();
+          } else {
+            debugPrint('ControlPanel: 用户未登录，跳过自动加载设备');
+          }
         } catch (e) {
           debugPrint('初始化错误: $e');
         }
@@ -63,6 +70,16 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
     final authState = ref.watch(authProvider);
     final deviceState = ref.watch(deviceProvider);
 
+    // 🎨 检测封面 URL 变化并提取颜色
+    final coverUrl = playbackState.albumCoverUrl;
+    if (coverUrl != _lastCoverUrl) {
+      _lastCoverUrl = coverUrl;
+      _dominantColor = null; // 清除旧颜色
+      if (coverUrl != null && coverUrl.isNotEmpty) {
+        Future.microtask(() => _extractDominantColor(coverUrl));
+      }
+    }
+
     // 延迟动画控制以避免在build中修改状态
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _albumAnimationController != null) {
@@ -82,11 +99,11 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
       backgroundColor: Colors.transparent,
       appBar: widget.showAppBar ? _buildAppBar(context) : null,
       body: SafeArea(
-        bottom: false,
+        bottom: true,
         child: CustomScrollView(
           slivers: [
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
               sliver: SliverList.list(
                 children: [
                   if (widget.showAppBar) const SizedBox(height: 0),
@@ -96,6 +113,11 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
                     authState,
                   ),
                   const SizedBox(height: 12),
+                  // 🎵 显示当前播放列表
+                  if (playbackState.currentPlaylistSongs.isNotEmpty)
+                    _buildCurrentPlaylist(playbackState),
+                  if (playbackState.currentPlaylistSongs.isNotEmpty)
+                    const SizedBox(height: 12),
                   if (playbackState.error != null)
                     _buildErrorMessage(playbackState),
                 ],
@@ -104,7 +126,7 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             // Fill remaining space so initial view does not leave a large blank
             SliverFillRemaining(
               hasScrollBody: false,
-              child: SizedBox(height: AppLayout.bottomOverlayHeight(context)),
+              child: SizedBox(height: AppLayout.bottomOverlayHeight(context) + 8),
             ),
           ],
         ),
@@ -127,6 +149,14 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
         ),
       ),
       actions: [
+        IconButton(
+          onPressed: () => Navigator.of(context).pushNamed('/now-playing'),
+          icon: Icon(
+            Icons.queue_music_rounded,
+            color: onSurface.withOpacity(0.8),
+          ),
+          tooltip: '正在播放',
+        ),
         IconButton(
           onPressed: () async {
             try {
@@ -171,7 +201,8 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
       ),
       child: Column(
         children: [
-          _buildDeviceSelector(deviceState),
+          // 🎯 始终显示设备区域，避免布局跳动
+          _buildDeviceArea(deviceState),
           const SizedBox(height: 12),
           _buildAlbumArtwork(currentMusic, currentMusic?.isPlaying ?? false),
           const SizedBox(height: 12),
@@ -183,8 +214,59 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             _buildInitialProgressBar(),
           const SizedBox(height: 8),
           _buildPlaybackControls(playbackState),
+          const SizedBox(height: 12),
+          _buildQuickActions(playbackState),
           const SizedBox(height: 8),
           _buildVolumeControl(playbackState),
+        ],
+      ),
+    );
+  }
+
+  /// 🎯 设备区域：始终显示固定高度，避免布局跳动
+  Widget _buildDeviceArea(DeviceState deviceState) {
+    if (deviceState.isLoading && deviceState.devices.isEmpty) {
+      // 加载中且没有设备：显示加载占位符
+      return _buildDeviceLoadingPlaceholder();
+    } else if (deviceState.devices.isNotEmpty) {
+      // 有设备：显示设备选择器
+      return _buildDeviceSelector(deviceState);
+    } else {
+      // 加载完成但没有设备：显示提示
+      return _buildNoDeviceHint();
+    }
+  }
+
+  /// 🎯 加载中的占位符（保持与设备选择器相同的高度）
+  Widget _buildDeviceLoadingPlaceholder() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: onSurface.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation(onSurface.withOpacity(0.6)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '正在加载设备...',
+            style: TextStyle(
+              color: onSurface.withOpacity(0.7),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -293,6 +375,62 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
     );
   }
 
+  /// 🎯 没有找到设备时的提示
+  Widget _buildNoDeviceHint() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.orangeAccent.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.orangeAccent.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            color: Colors.orangeAccent,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '未找到播放设备，请检查设置',
+              style: TextStyle(
+                color: onSurface,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.refresh_rounded,
+              color: Colors.orangeAccent,
+              size: 18,
+            ),
+            onPressed: () async {
+              try {
+                await ref.read(deviceProvider.notifier).loadDevices();
+              } catch (e) {
+                // ignore
+              }
+            },
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showDeviceSelectionSheet(BuildContext context, DeviceState state) {
     showModalBottomSheet(
       context: context,
@@ -372,7 +510,11 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
                       final isSelected = state.selectedDeviceId == device.id;
                       return ListTile(
                         leading: Icon(
-                          Icons.speaker_group_rounded,
+                          // 🎯 根据设备类型显示不同图标
+                          device.isLocalDevice
+                              ? Icons
+                                  .phone_android_rounded // 本机设备
+                              : Icons.speaker_group_rounded, // 播放设备
                           color:
                               (device.isOnline ?? false)
                                   ? Colors.greenAccent
@@ -412,6 +554,13 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
     final screenWidth = MediaQuery.of(context).size.width;
     final artworkSize = screenWidth * 0.46;
 
+    // ✨ 获取封面图 URL
+    final playbackState = ref.watch(playbackProvider);
+    final coverUrl = playbackState.albumCoverUrl;
+
+    // 🎨 使用提取的主色调或默认主题色
+    final glowColor = _dominantColor ?? Theme.of(context).colorScheme.primary;
+
     return Center(
       child: RotationTransition(
         turns: _albumAnimationController ?? kAlwaysCompleteAnimation,
@@ -429,34 +578,55 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
               ),
               if (isPlaying)
                 BoxShadow(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.4),
+                  color: glowColor.withOpacity(0.4),
                   blurRadius: 50,
                   spreadRadius: 10,
                 ),
             ],
           ),
           child: ClipOval(
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    onSurface.withOpacity(0.02),
-                    onSurface.withOpacity(0.1),
-                  ],
-                ),
-              ),
-              child: Icon(
-                Icons.music_note_rounded,
-                size: artworkSize * 0.32,
-                color: onSurface.withOpacity(0.8),
-              ),
-            ),
+            child:
+                coverUrl != null && coverUrl.isNotEmpty
+                    ? Image.network(
+                      coverUrl,
+                      fit: BoxFit.cover,
+                      width: artworkSize,
+                      height: artworkSize,
+                      errorBuilder: (context, error, stackTrace) {
+                        // ✨ 加载失败时显示默认图标
+                        return _buildDefaultArtwork(artworkSize, onSurface);
+                      },
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) {
+                          return child;
+                        }
+                        // ✨ 加载中显示默认图标
+                        return _buildDefaultArtwork(artworkSize, onSurface);
+                      },
+                    )
+                    : _buildDefaultArtwork(artworkSize, onSurface),
           ),
         ),
+      ),
+    );
+  }
+
+  /// 默认的专辑封面（音乐图标）
+  Widget _buildDefaultArtwork(double artworkSize, Color onSurface) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [onSurface.withOpacity(0.02), onSurface.withOpacity(0.1)],
+        ),
+      ),
+      child: Icon(
+        Icons.music_note_rounded,
+        size: artworkSize * 0.32,
+        color: onSurface.withOpacity(0.8),
       ),
     );
   }
@@ -483,9 +653,7 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             height: fixedTitleHeight,
             child: Center(
               child: Text(
-                currentMusic != null
-                    ? currentMusic.curMusic
-                    : (hasLoaded ? '暂无播放' : '加载中...'),
+                currentMusic != null ? currentMusic.curMusic : '暂无播放',
                 style: const TextStyle(
                   fontSize: titleFontSize,
                   fontWeight: FontWeight.bold,
@@ -507,19 +675,6 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
                   (currentMusic != null && currentMusic.curPlaylist != null)
                       ? Text(
                         currentMusic.curPlaylist,
-                        style: TextStyle(
-                          fontSize: subtitleFontSize,
-                          fontWeight: FontWeight.w500,
-                          color: onSurface.withOpacity(0.7),
-                          height: subtitleLineHeight,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      )
-                      : (!hasLoaded)
-                      ? Text(
-                        '正在连接服务器...',
                         style: TextStyle(
                           fontSize: subtitleFontSize,
                           fontWeight: FontWeight.w500,
@@ -559,33 +714,16 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
               context,
             ).colorScheme.primary.withOpacity(0.2),
           ),
-          child: Stack(
-            children: [
-              Slider(
-                value: progress,
-                onChanged: AppConstants.enableSeek ? (value) {} : null,
-                onChangeEnd:
-                    AppConstants.enableSeek
-                        ? (value) {
-                          final newPos = (value * totalTime).round();
-                          ref.read(playbackProvider.notifier).seekTo(newPos);
-                        }
-                        : null,
-              ),
-              if (!AppConstants.enableSeek)
-                Positioned.fill(
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () {
-                        AppSnackBar.showText(context, '服务器未支持进度拖动');
-                      },
-                      splashColor: Colors.transparent,
-                      highlightColor: Colors.transparent,
-                    ),
-                  ),
-                ),
-            ],
+          child: Slider(
+            value: progress,
+            onChanged: AppConstants.enableSeek ? (value) {} : null,
+            onChangeEnd:
+                AppConstants.enableSeek
+                    ? (value) {
+                      final newPos = (value * totalTime).round();
+                      ref.read(playbackProvider.notifier).seekTo(newPos);
+                    }
+                    : null,
           ),
         ),
         const SizedBox(height: 4),
@@ -602,26 +740,6 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             ),
           ],
         ),
-        if (!AppConstants.enableSeek) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 14,
-                color: onSurface.withOpacity(0.5),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '服务器未支持进度拖动',
-                style: TextStyle(
-                  color: onSurface.withOpacity(0.5),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ],
       ],
     );
   }
@@ -644,37 +762,14 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
           ),
           child: Slider(value: 0, min: 0, max: 1, onChanged: null),
         ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
-              Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
-            ],
-          ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
+            Text('0:00', style: TextStyle(color: onSurface.withOpacity(0.7))),
+          ],
         ),
-        if (!AppConstants.enableSeek) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 14,
-                color: onSurface.withOpacity(0.5),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '服务器未支持进度拖动',
-                style: TextStyle(
-                  color: onSurface.withOpacity(0.5),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-        ],
       ],
     );
   }
@@ -828,7 +923,7 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
             min: 0,
             max: 100,
             onChanged: (value) {
-              // 先本地更新，避免频繁打到后端引起音箱多次响
+              // 先本地更新，避免频繁打到后端引起设备多次响
               ref.read(playbackProvider.notifier).setVolumeLocal(value.round());
             },
             onChangeEnd: (value) {
@@ -873,5 +968,283 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
         ],
       ),
     );
+  }
+
+  /// 🎵 快捷操作按钮（播放模式切换 + 定时关机 + 加入收藏）
+  Widget _buildQuickActions(PlaybackState state) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final enabled = ref.read(deviceProvider).selectedDeviceId != null;
+    final favoriteEnabled = enabled && state.currentMusic != null;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // 播放模式切换按钮
+        IconButton(
+          icon: Icon(state.playMode.icon),
+          iconSize: 28,
+          color:
+              enabled
+                  ? Theme.of(context).colorScheme.primary
+                  : onSurface.withOpacity(0.4),
+          onPressed:
+              enabled
+                  ? () {
+                    // 循环切换到下一个播放模式
+                    final currentMode = state.playMode;
+                    final nextMode =
+                        PlayMode.values[(currentMode.index + 1) %
+                            PlayMode.values.length];
+                    ref
+                        .read(playbackProvider.notifier)
+                        .switchPlayMode(nextMode);
+                  }
+                  : null,
+          tooltip: state.playMode.displayName,
+        ),
+        const SizedBox(width: 32),
+        // 定时关机按钮（长按快速取消定时）
+        GestureDetector(
+          onLongPress:
+              enabled && state.timerMinutes > 0
+                  ? () {
+                    // 长按快速关闭定时
+                    ref.read(playbackProvider.notifier).cancelTimer();
+                  }
+                  : null,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.timer_outlined),
+                iconSize: 28,
+                color:
+                    enabled
+                        ? (state.timerMinutes > 0
+                            ? Colors.orangeAccent
+                            : onSurface)
+                        : onSurface.withOpacity(0.4),
+                onPressed:
+                    enabled
+                        ? () => ref.read(playbackProvider.notifier).setTimer()
+                        : null,
+                tooltip:
+                    state.timerMinutes > 0
+                        ? '${state.timerMinutes}分钟后关机\n长按取消定时'
+                        : '定时关机',
+              ),
+              if (state.timerMinutes > 0)
+                Positioned(
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orangeAccent,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${state.timerMinutes}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 32),
+        // 收藏/取消收藏按钮
+        IconButton(
+          icon: Icon(
+            state.isFavorite
+                ? Icons.favorite_rounded
+                : Icons.favorite_border_rounded,
+          ),
+          iconSize: 28,
+          color:
+              favoriteEnabled
+                  ? (state.isFavorite ? Colors.redAccent : Colors.pinkAccent)
+                  : onSurface.withOpacity(0.4),
+          onPressed:
+              favoriteEnabled
+                  ? () => ref.read(playbackProvider.notifier).toggleFavorites()
+                  : null,
+          tooltip: state.isFavorite ? '取消收藏' : '加入收藏',
+        ),
+      ],
+    );
+  }
+
+  /// 🎵 显示当前播放列表
+  Widget _buildCurrentPlaylist(PlaybackState state) {
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final currentSong = state.currentMusic?.curMusic ?? '';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color:
+            isLight
+                ? Colors.white.withOpacity(0.6)
+                : Colors.black.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.queue_music_rounded,
+                color: Theme.of(context).colorScheme.primary,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '当前播放列表',
+                style: TextStyle(
+                  color: onSurface,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${state.currentPlaylistSongs.length} 首',
+                style: TextStyle(
+                  color: onSurface.withOpacity(0.6),
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // 限制最大高度，超出可滚动
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 300),
+            child: ListView.builder(
+              shrinkWrap: true,
+              physics: const ClampingScrollPhysics(),
+              itemCount: state.currentPlaylistSongs.length,
+              itemBuilder: (context, index) {
+                final song = state.currentPlaylistSongs[index];
+                final isCurrentSong = song == currentSong;
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  decoration: BoxDecoration(
+                    color:
+                        isCurrentSong
+                            ? Theme.of(
+                              context,
+                            ).colorScheme.primary.withOpacity(0.1)
+                            : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    leading: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color:
+                            isCurrentSong
+                                ? Theme.of(context).colorScheme.primary
+                                : onSurface.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child:
+                            isCurrentSong
+                                ? Icon(
+                                  Icons.play_arrow_rounded,
+                                  color: Colors.white,
+                                  size: 18,
+                                )
+                                : Text(
+                                  '${index + 1}',
+                                  style: TextStyle(
+                                    color: onSurface.withOpacity(0.7),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                      ),
+                    ),
+                    title: Text(
+                      song,
+                      style: TextStyle(
+                        color:
+                            isCurrentSong
+                                ? Theme.of(context).colorScheme.primary
+                                : onSurface,
+                        fontSize: 14,
+                        fontWeight:
+                            isCurrentSong ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing:
+                        isCurrentSong
+                            ? Icon(
+                              Icons.graphic_eq_rounded,
+                              color: Theme.of(context).colorScheme.primary,
+                              size: 20,
+                            )
+                            : null,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 🎨 从封面图提取主色调
+  Future<void> _extractDominantColor(String imageUrl) async {
+    try {
+      debugPrint('🎨 [ControlPanel] 开始提取封面主色调: $imageUrl');
+      final imageProvider = CachedNetworkImageProvider(imageUrl);
+      final paletteGenerator = await PaletteGenerator.fromImageProvider(
+        imageProvider,
+        maximumColorCount: 10,
+      );
+
+      final extractedColor = paletteGenerator.dominantColor?.color ??
+          paletteGenerator.vibrantColor?.color;
+
+      debugPrint('🎨 [ControlPanel] 提取到的颜色: $extractedColor');
+
+      if (mounted) {
+        setState(() {
+          _dominantColor = extractedColor;
+        });
+        debugPrint('🎨 [ControlPanel] 颜色已应用到 UI');
+      }
+    } catch (e) {
+      debugPrint('❌ [ControlPanel] 提取封面主色调失败: $e');
+    }
   }
 }

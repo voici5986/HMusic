@@ -23,6 +23,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   void initState() {
     super.initState();
     _formKey = GlobalKey<FormState>();
+    void listener() { if (mounted) setState(() {}); }
+    _serverUrlController.addListener(listener);
+    _usernameController.addListener(listener);
+    _passwordController.addListener(listener);
   }
 
   @override
@@ -34,15 +38,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   }
 
   void _handleLogin() {
-    if (_formKey.currentState!.validate()) {
-      ref
-          .read(authProvider.notifier)
-          .login(
-            serverUrl: _serverUrlController.text,
-            username: _usernameController.text,
-            password: _passwordController.text,
-          );
-    }
+    if (!_formKey.currentState!.validate()) return;
+    ref.read(authProvider.notifier).login(
+      serverUrl: _serverUrlController.text.trim(),
+      username: _usernameController.text.trim(),
+      password: _passwordController.text,
+    );
   }
 
   @override
@@ -61,7 +62,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Color(0xFFF7F8FA), Color(0xFFEFF3F8)],
+                    colors: [Color(0xFFF9FBFB), Color(0xFFF1F9F8)],
                   ),
                 )
                 : const BoxDecoration(
@@ -104,26 +105,33 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         height: 100,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
-                          ),
+                          color: Colors.white.withOpacity(isLight ? 1.0 : 0.1),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF667EEA).withOpacity(0.3),
+                              color: Colors.black.withOpacity(0.05),
                               blurRadius: 20,
                               offset: const Offset(0, 10),
                             ),
                           ],
                         ),
-                        child: const Icon(
-                          Icons.music_note_rounded,
-                          size: 50,
-                          color: Colors.white,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Image.asset(
+                            'xiaoai_music_box_icon.png',
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Icon(
+                                Icons.music_note_rounded,
+                                size: 50,
+                                color: isLight ? const Color(0xFF21B0A5) : Colors.white,
+                              );
+                            },
+                          ),
                         ),
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        '小爱音乐',
+                        'HMusic',
                         style: TextStyle(
                           fontSize: 32,
                           fontWeight: FontWeight.bold,
@@ -136,7 +144,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               isLight
                                   ? [
                                     Shadow(
-                                      color: Colors.black.withOpacity(0.1),
+                                      color: Colors.black.withOpacity(0.08),
                                       offset: const Offset(0, 1),
                                       blurRadius: 3,
                                     ),
@@ -152,7 +160,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '连接您的智能音响',
+                        '播放 NAS 音乐',
                         style: TextStyle(
                           fontSize: 16,
                           color:
@@ -176,7 +184,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       color:
                           isLight
                               ? Colors.white
-                              : Colors.white.withOpacity(0.08),
+                              : Colors.white.withOpacity(0.06),
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(
                         color:
@@ -189,7 +197,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           isLight
                               ? [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.06),
+                                  color: Colors.black.withOpacity(0.04),
                                   blurRadius: 24,
                                   offset: const Offset(0, 8),
                                 ),
@@ -213,6 +221,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             labelText: '服务器地址',
                             hintText: AppConstants.defaultServerUrl,
                             prefixIcon: Icons.dns_rounded,
+                            textInputAction: TextInputAction.next,
+                            enableClear: true,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
                                 return '请输入服务器地址';
@@ -227,8 +237,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           _buildModernTextField(
                             controller: _usernameController,
                             labelText: '用户名',
-                            hintText: '请输入用户名',
+                            hintText: 'xiaomusic 后台的账号',
                             prefixIcon: Icons.person_rounded,
+                            textInputAction: TextInputAction.next,
+                            enableClear: true,
                             validator: (value) {
                               if (value == null || value.isEmpty) {
                                 return '请输入用户名';
@@ -243,15 +255,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           _buildModernTextField(
                             controller: _passwordController,
                             labelText: '密码',
-                            hintText: '请输入密码',
+                            hintText: 'xiaomusic 后台的密码',
                             prefixIcon: Icons.lock_rounded,
                             obscureText: _obscurePassword,
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) => _handleLogin(),
                             suffixIcon: IconButton(
                               icon: Icon(
                                 _obscurePassword
                                     ? Icons.visibility_rounded
                                     : Icons.visibility_off_rounded,
-                                color: Colors.white.withOpacity(0.6),
+                                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
                               ),
                               onPressed: () {
                                 setState(() {
@@ -337,6 +351,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     bool obscureText = false,
     Widget? suffixIcon,
     String? Function(String?)? validator,
+    TextInputAction? textInputAction,
+    void Function(String)? onSubmitted,
+    bool enableClear = false,
   }) {
     return TextFormField(
       controller: controller,
@@ -346,6 +363,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         fontSize: 16,
         fontWeight: FontWeight.w500,
       ),
+      textInputAction: textInputAction,
+      onFieldSubmitted: onSubmitted,
       decoration: InputDecoration(
         labelText: labelText,
         hintText: hintText,
@@ -354,7 +373,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
           size: 22,
         ),
-        suffixIcon: suffixIcon,
+        suffixIcon: suffixIcon ?? (
+          enableClear && controller.text.isNotEmpty
+              ? IconButton(
+                  icon: Icon(
+                    Icons.clear_rounded,
+                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                  ),
+                  onPressed: () => controller.clear(),
+                )
+              : null
+        ),
         labelStyle: TextStyle(
           color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
           fontSize: 14,
@@ -418,7 +447,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         gradient:
             onPressed != null
                 ? const LinearGradient(
-                  colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
+                  colors: [Color(0xFF23B0A6), Color(0xFF1EA396)],
                 )
                 : LinearGradient(
                   colors: [
@@ -431,7 +460,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             onPressed != null
                 ? [
                   BoxShadow(
-                    color: const Color(0xFF667EEA).withOpacity(0.3),
+                    color: const Color(0xFF23B0A6).withOpacity(0.22),
                     blurRadius: 16,
                     offset: const Offset(0, 8),
                   ),

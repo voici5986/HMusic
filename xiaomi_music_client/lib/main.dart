@@ -2,11 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import 'app_router.dart';
+import 'presentation/providers/js_proxy_provider.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    // warm-up by touching singleton instance
+    // ignore: unnecessary_statements
+    DefaultCacheManager();
+  } catch (_) {}
 
   // 禁用Flutter调试边框和调试信息
   debugPaintSizeEnabled = false;
@@ -65,30 +73,35 @@ class MyApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final seed = const Color(0xFF007AFF); // 小米/澎湃常用蓝
+    final seed = const Color(0xFF21B0A5);
 
     final lightScheme = ColorScheme.fromSeed(
       seedColor: seed,
       brightness: Brightness.light,
+      primary: seed,
+      surface: Colors.white, // 纯白背景
     );
     final darkScheme = ColorScheme.fromSeed(
       seedColor: seed,
       brightness: Brightness.dark,
+      primary: seed,
     );
 
+    // 在应用构建阶段预热JS代理（读取provider以触发初始化和自动加载）
+    ref.read(jsProxyProvider);
+
     return MaterialApp.router(
-      title: '小爱音乐控制器',
+      title: 'HMusic',
       themeMode: ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: lightScheme,
-        scaffoldBackgroundColor: lightScheme.surface,
+        scaffoldBackgroundColor: Colors.white, // 使用白色背景，与启动屏一致
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.transparent,
           foregroundColor: Colors.black,
           elevation: 0,
           centerTitle: true,
-          surfaceTintColor: Colors.transparent,
           scrolledUnderElevation: 0,
           systemOverlayStyle: SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
@@ -119,7 +132,6 @@ class MyApp extends ConsumerWidget {
           foregroundColor: Colors.white,
           elevation: 0,
           centerTitle: true,
-          surfaceTintColor: Colors.transparent,
           scrolledUnderElevation: 0,
         ),
         snackBarTheme: SnackBarThemeData(

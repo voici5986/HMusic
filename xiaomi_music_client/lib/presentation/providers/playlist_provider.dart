@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/playlist.dart';
 import 'auth_provider.dart';
@@ -46,15 +47,14 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
   final Ref ref;
 
   PlaylistNotifier(this.ref) : super(const PlaylistState()) {
-    // 如果已登录则加载一次
-    if (ref.read(apiServiceProvider) != null) {
-      _loadPlaylists();
-    }
-
-    // 监听认证状态变化，认证成功后自动加载播放列表
+    // 监听认证状态变化，在用户登录后自动加载播放列表
     ref.listen<AuthState>(authProvider, (previous, next) {
-      if (next is AuthAuthenticated) {
-        _loadPlaylists();
+      if (next is AuthAuthenticated && previous is! AuthAuthenticated) {
+        debugPrint('PlaylistProvider: 用户已认证，自动加载播放列表');
+        // 延迟一点时间确保认证完全完成
+        Future.delayed(const Duration(milliseconds: 500), () {
+          refreshPlaylists();
+        });
       }
       if (next is AuthInitial) {
         state = const PlaylistState();
@@ -141,9 +141,9 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
       state = state.copyWith(isLoading: true);
 
       await apiService.playMusicList(
-        deviceId: deviceId,
-        playlistName: playlistName,
-        musicName: specificMusic,
+        did: deviceId,
+        listName: playlistName,
+        musicName: specificMusic ?? '',
       );
 
       state = state.copyWith(isLoading: false);

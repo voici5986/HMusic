@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:ui';
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'control_panel_page.dart';
 import 'playlist_page.dart';
 import 'music_search_page.dart';
@@ -14,6 +16,7 @@ import '../providers/music_library_provider.dart';
 import '../widgets/app_snackbar.dart';
 import '../providers/ssh_settings_provider.dart';
 import '../providers/playlist_provider.dart';
+import '../providers/playback_provider.dart';
 
 class MainPage extends ConsumerStatefulWidget {
   const MainPage({super.key});
@@ -25,6 +28,7 @@ class MainPage extends ConsumerStatefulWidget {
 class _MainPageState extends ConsumerState<MainPage> {
   int _selectedIndex = 0;
   final _searchController = TextEditingController();
+  Timer? _searchDebounce;
 
   List<Widget> get _pages => [
     const ControlPanelPage(
@@ -37,15 +41,47 @@ class _MainPageState extends ConsumerState<MainPage> {
   ];
 
   void _onItemTapped(int index) {
+    final wasIndex = _selectedIndex;
     setState(() {
       _selectedIndex = index;
     });
+    // 当切到“列表”标签（index 2）时触发一次加载
+    if (index == 2 && wasIndex != 2) {
+      final auth = ref.read(authProvider);
+      if (auth is AuthAuthenticated) {
+        ref.read(playlistProvider.notifier).refreshPlaylists();
+      }
+    }
   }
 
-  // 搜索页已移除
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(_handleSearchTextChanged);
+  }
+
+  void _handleSearchTextChanged() {
+    // Keep UI (clear button visibility) in sync
+    if (mounted) setState(() {});
+
+    // Ignore input while IME is composing (e.g., Pinyin on macOS)
+    if (_searchController.value.composing.isValid) {
+      return;
+    }
+
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      if (_searchController.value.composing.isValid) return;
+      final text = _searchController.text;
+      ref.read(musicSearchProvider.notifier).searchOnline(text);
+    });
+  }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.removeListener(_handleSearchTextChanged);
     _searchController.dispose();
     super.dispose();
   }
@@ -120,13 +156,12 @@ class _MainPageState extends ConsumerState<MainPage> {
         height: 56.0, // Standard AppBar height
         child: Row(
           children: [
-            Text(
-              '小爱音乐',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: onSurface,
-                letterSpacing: 0.5,
+            Transform.translate(
+              offset: const Offset(-8, 8),
+              child: SvgPicture.asset(
+                'assets/hmusic-logo.svg',
+                width: 180,
+                fit: BoxFit.fitWidth,
               ),
             ),
             const Spacer(),
@@ -151,7 +186,8 @@ class _MainPageState extends ConsumerState<MainPage> {
                   tooltip: '上传音乐文件',
                 ),
               ),
-            PopupMenuButton<String>(
+            IconButton(
+              onPressed: () => context.push('/settings'),
               icon: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
@@ -160,178 +196,6 @@ class _MainPageState extends ConsumerState<MainPage> {
                 ),
                 child: Icon(Icons.settings_rounded, color: onSurface, size: 20),
               ),
-              color: Theme.of(context).colorScheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              onSelected: (value) {
-                switch (value) {
-                  case 'download_from_link':
-                    _showDownloadFromLinkDialog();
-                    break;
-                  case 'download_settings':
-                    context.push('/settings/download');
-                    break;
-                  case 'download_tasks':
-                    context.push('/downloads');
-                    break;
-                  case 'ssh_settings':
-                    context.push('/settings/ssh');
-                    break;
-                  case 'server_settings':
-                    context.push('/settings/server');
-                    break;
-                  case 'source_settings':
-                    context.push('/settings/source');
-                    break;
-                  case 'tts_settings':
-                    context.push('/settings/tts');
-                    break;
-                  case 'logout':
-                    ref.read(authProvider.notifier).logout();
-                    break;
-                }
-              },
-              itemBuilder:
-                  (context) => [
-                    PopupMenuItem(
-                      value: 'download_from_link',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.link_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '从链接下载',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'source_settings',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.audio_file_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '音源设置',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'tts_settings',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.record_voice_over_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'TTS文字转语音',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'download_tasks',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.download_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '下载任务',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'download_settings',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.settings_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '下载设置',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'server_settings',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.http_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '服务器账号设置',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'ssh_settings',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.cloud_upload_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'SCP 上传设置',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const PopupMenuDivider(),
-                    PopupMenuItem(
-                      value: 'logout',
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.logout_rounded,
-                            color: onSurface.withOpacity(0.8),
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            '退出登录',
-                            style: TextStyle(color: onSurface.withOpacity(0.9)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
             ),
           ],
         ),
@@ -354,13 +218,6 @@ class _MainPageState extends ConsumerState<MainPage> {
       child: TextField(
         key: const ValueKey('online_search_field'),
         controller: _searchController,
-        onChanged: (value) {
-          Future.delayed(const Duration(milliseconds: 350), () {
-            if (_searchController.text == value) {
-              ref.read(musicSearchProvider.notifier).searchOnline(value);
-            }
-          });
-        },
         style: TextStyle(color: onSurface),
         decoration: InputDecoration(
           hintText: '在线搜索歌曲...',
@@ -390,7 +247,7 @@ class _MainPageState extends ConsumerState<MainPage> {
             borderSide: BorderSide.none,
           ),
           contentPadding: const EdgeInsets.symmetric(
-            vertical: 0,
+            vertical: 8,
             horizontal: 16,
           ),
         ),
@@ -401,73 +258,67 @@ class _MainPageState extends ConsumerState<MainPage> {
   Widget _buildModernBottomNav() {
     // 获取底部安全区域高度（包括小白条）
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-    final hasBottomInset = bottomPadding > 0;
+    final gestureInset = MediaQuery.of(context).systemGestureInsets.bottom;
+    final hasGesture = gestureInset > 0 || bottomPadding > 0;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
     return Container(
       margin: EdgeInsets.only(
         left: 20,
         right: 20,
-        bottom: hasBottomInset ? bottomPadding + 8 : 20,
+        bottom: hasGesture ? ((bottomPadding + 8 - 15).clamp(0, double.infinity)) : 20,
         top: 10,
       ),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: onSurface.withOpacity(0.1), width: 1),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06), width: 1), // 更淡的边框
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
+            color: Colors.black.withValues(alpha: 0.04), // 更淡的阴影
             blurRadius: 24,
-            offset: const Offset(0, 12),
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
-        child: Stack(
-          children: [
-            // Glass blur background
-            BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface.withOpacity(0.7),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24), // 增强模糊
+          child: Container(
+            height: 68,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.20), // 更透明
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildTabItem(
+                  icon: Icons.play_circle_outline_rounded,
+                  activeIcon: Icons.play_circle_filled_rounded,
+                  label: '播放',
+                  index: 0,
                 ),
-              ),
+                _buildTabItem(
+                  icon: Icons.search_rounded,
+                  activeIcon: Icons.search_rounded,
+                  label: '搜索',
+                  index: 1,
+                ),
+                _buildTabItem(
+                  icon: Icons.playlist_play_outlined,
+                  activeIcon: Icons.playlist_play_rounded,
+                  label: '列表',
+                  index: 2,
+                ),
+                _buildTabItem(
+                  icon: Icons.library_music_outlined,
+                  activeIcon: Icons.library_music_rounded,
+                  label: '曲库',
+                  index: 3,
+                ),
+              ],
             ),
-            SizedBox(
-              height: 68,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildTabItem(
-                    icon: Icons.play_circle_outline_rounded,
-                    activeIcon: Icons.play_circle_filled_rounded,
-                    label: '控制',
-                    index: 0,
-                  ),
-                  _buildTabItem(
-                    icon: Icons.search_rounded,
-                    activeIcon: Icons.search_rounded,
-                    label: '搜索',
-                    index: 1,
-                  ),
-                  _buildTabItem(
-                    icon: Icons.playlist_play_outlined,
-                    activeIcon: Icons.playlist_play_rounded,
-                    label: '列表',
-                    index: 2,
-                  ),
-                  _buildTabItem(
-                    icon: Icons.library_music_outlined,
-                    activeIcon: Icons.library_music_rounded,
-                    label: '曲库',
-                    index: 3,
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -483,7 +334,7 @@ class _MainPageState extends ConsumerState<MainPage> {
     final activeColor = Theme.of(context).colorScheme.primary;
     final inactiveColor = Theme.of(
       context,
-    ).colorScheme.onSurface.withOpacity(0.7);
+    ).colorScheme.onSurface.withValues(alpha: 0.7);
 
     return Expanded(
       child: GestureDetector(
@@ -496,17 +347,16 @@ class _MainPageState extends ConsumerState<MainPage> {
             children: [
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
-                transitionBuilder:
-                    (child, animation) =>
-                        ScaleTransition(scale: animation, child: child),
-                child: Icon(
-                  isSelected ? activeIcon : icon,
-                  key: ValueKey<String>(
-                    'nav_icon_${index}_$isSelected',
-                  ), // Unique key for each navigation icon
-                  size: 26,
-                  color: isSelected ? activeColor : inactiveColor,
-                ),
+                transitionBuilder: (child, animation) =>
+                    ScaleTransition(scale: animation, child: child),
+                child: index == 0
+                    ? _buildPlayTabIcon(isSelected, activeColor, inactiveColor)
+                    : Icon(
+                        isSelected ? activeIcon : icon,
+                        key: ValueKey<String>('nav_icon_${index}_$isSelected'),
+                        size: 26,
+                        color: isSelected ? activeColor : inactiveColor,
+                      ),
               ),
               const SizedBox(height: 4),
               Text(
@@ -522,6 +372,100 @@ class _MainPageState extends ConsumerState<MainPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPlayTabIcon(bool isSelected, Color activeColor, Color inactiveColor) {
+    final playback = ref.watch(playbackProvider);
+    final cover = playback.albumCoverUrl;
+    final isPlaying = playback.currentMusic?.isPlaying ?? false;
+    final borderColor = (isSelected ? activeColor : inactiveColor).withValues(alpha: 0.6);
+
+    // 计算播放进度 (0.0 - 1.0)
+    final offset = playback.currentMusic?.offset ?? 0;
+    final duration = playback.currentMusic?.duration ?? 0;
+    final progress = duration > 0 ? (offset / duration).clamp(0.0, 1.0) : 0.0;
+
+    Widget image = Container(
+      width: 26,
+      height: 26,
+      decoration: BoxDecoration(
+        color: inactiveColor.withValues(alpha: 0.15),
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        Icons.play_circle_filled_rounded,
+        size: 16,
+        color: isSelected ? activeColor : inactiveColor,
+      ),
+    );
+
+    if (cover != null && cover.isNotEmpty) {
+      final thumb = Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: CachedNetworkImage(
+          imageUrl: cover,
+          fit: BoxFit.cover,
+          fadeInDuration: const Duration(milliseconds: 150),
+          errorWidget: (_, __, ___) => Icon(
+            Icons.music_note_rounded,
+            size: 16,
+            color: inactiveColor,
+          ),
+        ),
+      );
+      image = thumb;
+    }
+
+    return Stack(
+      key: ValueKey<String>('play_tab_icon_${cover ?? 'none'}_${isPlaying}_$isSelected'),
+      clipBehavior: Clip.none,
+      children: [
+        // 外围进度圈
+        SizedBox(
+          width: 30,
+          height: 30,
+          child: CircularProgressIndicator(
+            value: progress,
+            strokeWidth: 2.0,
+            backgroundColor: borderColor.withValues(alpha: 0.2),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              isSelected ? activeColor : inactiveColor,
+            ),
+          ),
+        ),
+        // 封面图 (居中)
+        Positioned(
+          left: 2,
+          top: 2,
+          child: image,
+        ),
+        // 播放状态指示器
+        Positioned(
+          right: -2,
+          bottom: -2,
+          child: Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              shape: BoxShape.circle,
+              border: Border.all(color: borderColor, width: 1),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              isPlaying ? Icons.equalizer_rounded : Icons.pause_rounded,
+              size: 10,
+              color: isSelected ? activeColor : inactiveColor,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -588,161 +532,6 @@ class _MainPageState extends ConsumerState<MainPage> {
         AppSnackBar.show(
           context,
           SnackBar(content: Text('选择文件失败：$e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  Future<void> _showDownloadFromLinkDialog() async {
-    final singleNameController = TextEditingController();
-    final singleUrlController = TextEditingController();
-    final listNameController = TextEditingController();
-    final listUrlController = TextEditingController();
-
-    Map<String, String>? result;
-
-    result = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (context) {
-        return DefaultTabController(
-          length: 2,
-          child: AlertDialog(
-            title: const Text('从链接下载到服务器'),
-            content: SizedBox(
-              width: 420,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const TabBar(tabs: [Tab(text: '单曲'), Tab(text: '合集')]),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 200,
-                    child: TabBarView(
-                      children: [
-                        // 单曲
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextField(
-                              controller: singleNameController,
-                              decoration: const InputDecoration(
-                                labelText: '歌曲名',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              controller: singleUrlController,
-                              decoration: const InputDecoration(
-                                labelText: '歌曲链接 URL',
-                                hintText: '例如：https://example.com/music.mp3',
-                                border: OutlineInputBorder(),
-                              ),
-                              maxLines: 2,
-                            ),
-                          ],
-                        ),
-                        // 合集
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextField(
-                              controller: listNameController,
-                              decoration: const InputDecoration(
-                                labelText: '保存目录名（播放列表名）',
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              controller: listUrlController,
-                              decoration: const InputDecoration(
-                                labelText: '合集/歌单链接 URL',
-                                hintText: '例如：https://example.com/playlist',
-                                border: OutlineInputBorder(),
-                              ),
-                              maxLines: 2,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('取消'),
-              ),
-              TextButton(
-                onPressed: () {
-                  final controller = DefaultTabController.of(context);
-                  final isPlaylist = (controller.index) == 1;
-                  if (isPlaylist) {
-                    final name = listNameController.text.trim();
-                    final url = listUrlController.text.trim();
-                    if (name.isEmpty || url.isEmpty) return;
-                    Navigator.pop<Map<String, String>>(context, {
-                      'type': 'playlist',
-                      'name': name,
-                      'url': url,
-                    });
-                  } else {
-                    final name = singleNameController.text.trim();
-                    final url = singleUrlController.text.trim();
-                    if (name.isEmpty || url.isEmpty) return;
-                    Navigator.pop<Map<String, String>>(context, {
-                      'type': 'single',
-                      'name': name,
-                      'url': url,
-                    });
-                  }
-                },
-                child: const Text('下载'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (!mounted || result == null) return;
-
-    try {
-      if (result['type'] == 'single') {
-        await ref
-            .read(musicLibraryProvider.notifier)
-            .downloadOneMusic(result['name']!, url: result['url']);
-        if (mounted) {
-          AppSnackBar.show(
-            context,
-            const SnackBar(
-              content: Text('已提交单曲下载任务'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } else if (result['type'] == 'playlist') {
-        await ref
-            .read(playlistProvider.notifier)
-            .downloadPlaylist(result['name']!, url: result['url']);
-        if (mounted) {
-          AppSnackBar.show(
-            context,
-            const SnackBar(
-              content: Text('已提交整表下载任务'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        AppSnackBar.show(
-          context,
-          SnackBar(content: Text('下载失败：$e'), backgroundColor: Colors.red),
         );
       }
     }
