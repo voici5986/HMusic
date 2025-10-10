@@ -5,6 +5,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// 加载签名配置
+import java.util.Properties
+import java.io.FileInputStream
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "com.hupc.hmusic"
     compileSdk = flutter.compileSdkVersion
@@ -30,21 +40,29 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = file(keystoreProperties["storeFile"] as String)
+            storePassword = keystoreProperties["storePassword"] as String
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
-            
-            // 暂时禁用Android层混淆，只使用Flutter混淆
-            isMinifyEnabled = false
-            isShrinkResources = false
-            
-            // R8混淆配置 (暂时禁用)
-            // proguardFiles(
-            //     getDefaultProguardFile("proguard-android-optimize.txt"),
-            //     "proguard-rules.pro"
-            // )
+            // 使用正式签名配置
+            signingConfig = signingConfigs.getByName("release")
+
+            // 启用R8混淆和资源压缩
+            isMinifyEnabled = true
+            isShrinkResources = true
+
+            // R8混淆配置
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../core/constants/app_constants.dart';
 import '../providers/update_provider.dart';
 
-class UpdatePage extends ConsumerWidget {
+class UpdatePage extends ConsumerStatefulWidget {
   final String title;
   final String message;
   final String downloadUrl;
@@ -21,8 +21,28 @@ class UpdatePage extends ConsumerWidget {
     this.targetVersion = '',
   });
 
+  @override
+  ConsumerState<UpdatePage> createState() => _UpdatePageState();
+}
+
+class _UpdatePageState extends ConsumerState<UpdatePage> {
+  String _currentVersion = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+    setState(() {
+      _currentVersion = packageInfo.version;
+    });
+  }
+
   Future<void> _launchDownload(BuildContext context) async {
-    if (downloadUrl.isEmpty) {
+    if (widget.downloadUrl.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('下载链接不可用')),
@@ -32,7 +52,7 @@ class UpdatePage extends ConsumerWidget {
     }
 
     try {
-      final uri = Uri.parse(downloadUrl);
+      final uri = Uri.parse(widget.downloadUrl);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
@@ -52,7 +72,7 @@ class UpdatePage extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final size = MediaQuery.of(context).size;
 
@@ -78,7 +98,7 @@ class UpdatePage extends ConsumerWidget {
 
                   // 标题
                   Text(
-                    title,
+                    widget.title,
                     style: TextStyle(
                       color: colorScheme.onSurface,
                       fontSize: 28,
@@ -89,7 +109,7 @@ class UpdatePage extends ConsumerWidget {
                   const SizedBox(height: 16),
 
                   // 版本信息
-                  if (targetVersion.isNotEmpty) ...[
+                  if (widget.targetVersion.isNotEmpty) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
@@ -100,7 +120,7 @@ class UpdatePage extends ConsumerWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            '当前版本: ${AppConstants.version}',
+                            '当前版本: $_currentVersion',
                             style: TextStyle(
                               color: colorScheme.onSurface.withOpacity(0.7),
                               fontSize: 14,
@@ -114,7 +134,7 @@ class UpdatePage extends ConsumerWidget {
                           ),
                           const SizedBox(width: 16),
                           Text(
-                            '最新版本: $targetVersion',
+                            '最新版本: ${widget.targetVersion}',
                             style: TextStyle(
                               color: colorScheme.primary,
                               fontSize: 14,
@@ -137,7 +157,7 @@ class UpdatePage extends ConsumerWidget {
                     ),
                     child: SingleChildScrollView(
                       child: Text(
-                        message.isNotEmpty ? message : '发现新版本，建议立即更新以获得更好的体验。',
+                        widget.message.isNotEmpty ? widget.message : '发现新版本，建议立即更新以获得更好的体验。',
                         style: TextStyle(
                           color: colorScheme.onSurface.withOpacity(0.8),
                           fontSize: 16,
@@ -150,7 +170,7 @@ class UpdatePage extends ConsumerWidget {
                   const SizedBox(height: 32),
 
                   // 强制更新提示
-                  if (force)
+                  if (widget.force)
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                       decoration: BoxDecoration(
@@ -183,7 +203,7 @@ class UpdatePage extends ConsumerWidget {
                   // 按钮组
                   Row(
                     children: [
-                      if (!force)
+                      if (!widget.force)
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () => ref.read(updateProvider.notifier).dismissUpdate(),
@@ -203,7 +223,7 @@ class UpdatePage extends ConsumerWidget {
                             ),
                           ),
                         ),
-                      if (force)
+                      if (widget.force)
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () => SystemNavigator.pop(),

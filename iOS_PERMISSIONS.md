@@ -15,21 +15,37 @@ iOS 的权限申请机制与 Android 完全不同：
 ## ✅ 已配置的权限
 
 ### 1. 网络访问权限（国际区iOS）
-**实现位置**: `lib/presentation/providers/initialization_provider.dart:178-202`
+**实现位置**: `ios/Runner/AppDelegate.swift:64-111`
 
-```dart
-/// 触发iOS网络权限弹窗（国际区iOS需要）
-Future<void> _triggerNetworkPermission() async {
-  final client = HttpClient();
-  client.connectionTimeout = const Duration(seconds: 3);
-  final request = await client.getUrl(Uri.parse('https://www.apple.com/library/test/success.html'));
-  final response = await request.close();
-  await response.drain();
-  client.close();
+```swift
+/// 触发iOS网络权限请求（国际区iOS需要）
+private func triggerNetworkPermission() {
+  DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+    let semaphore = DispatchSemaphore(value: 0)
+
+    // 创建一个简单的网络请求来触发权限弹窗
+    guard let url = URL(string: "https://www.apple.com/library/test/success.html") else {
+      semaphore.signal()
+      return
+    }
+
+    let task = URLSession.shared.dataTask(with: URLRequest(url: url)) { _, _, error in
+      // 请求完成，无论成功失败
+      semaphore.signal()
+    }
+
+    task.resume()
+
+    // 等待网络请求完成（最多等待10秒）
+    _ = semaphore.wait(timeout: .now() + 10.0)
+
+    // 额外等待500ms，确保权限弹窗处理完毕
+    Thread.sleep(forTimeInterval: 0.5)
+  }
 }
 ```
 
-**触发时机**: 应用启动时在权限请求阶段自动触发
+**触发时机**: 应用启动时，在Flutter引擎初始化**之前**自动触发（在`didFinishLaunchingWithOptions`方法的最开始），并阻塞等待权限处理完成（最多12秒），确保用户处理完网络权限弹窗后再继续初始化Flutter，避免与本地网络权限弹窗冲突
 
 **弹窗内容**（国际区iOS）:
 ```
@@ -45,6 +61,7 @@ Future<void> _triggerNetworkPermission() async {
 - 必须通过发起网络请求来触发系统权限对话框
 - 用户需要选择允许使用WiFi、蜂窝数据或两者
 - 中国区iOS不需要此步骤，应用默认可以访问网络
+- ⚠️ **关键优化**：等待网络权限弹窗完全关闭后（额外延迟1秒），再初始化Flutter，避免与本地网络权限弹窗同时出现
 
 ---
 
@@ -168,13 +185,48 @@ These can be configured in Settings.
 ## 🔍 权限申请流程
 
 ### 启动时自动申请的权限
-1. ✅ **网络访问权限（国际区）** - 应用启动时自动触发
-2. ✅ **通知权限** - 应用启动时立即弹出
 
-### 首次使用时申请的权限
-3. ✅ **本地网络权限** - 首次访问本地 IP 时弹出
-4. ✅ **媒体库权限** - 首次访问媒体库时弹出
-5. ✅ **麦克风权限** - 首次使用麦克风时弹出
+**iOS平台启动流程（已优化，避免权限弹窗冲突）**：
+```
+APP启动（原生层）
+  ↓
+1. 立即触发网络权限请求（原生层发起HTTP请求）
+  ↓
+2. 用户看到"想要使用数据"弹窗 → 用户选择允许/拒绝
+  ↓
+3. 等待权限弹窗完全关闭（请求完成后额外等待1秒）
+  ↓
+4. Flutter引擎开始初始化
+  ↓
+5. 检查应用更新（需要网络）
+  ↓
+6. 如果有更新 → 显示更新页面
+   如果无更新 → 继续初始化
+  ↓
+7. 请求通知权限
+  ↓
+8. 首次访问本地IP时弹出本地网络权限（此时网络权限已处理完毕，不会冲突）
+```
+
+**Android平台启动流程**：
+```
+APP启动
+  ↓
+1. 直接检查应用更新
+  ↓
+2. 如果有更新 → 显示更新页面
+   如果无更新 → 继续初始化
+  ↓
+3. 请求其他必要权限
+```
+
+### 权限申请时机总结
+1. ✅ **网络访问权限（国际区iOS）** - APP启动立即触发（最早）
+2. ✅ **版本更新检查** - 网络权限授权后立即执行
+3. ✅ **通知权限** - 无更新时在初始化流程中申请
+4. ✅ **本地网络权限** - 首次访问本地 IP 时弹出
+5. ✅ **媒体库权限** - 首次访问媒体库时弹出
+6. ✅ **麦克风权限** - 首次使用麦克风时弹出
 
 ---
 

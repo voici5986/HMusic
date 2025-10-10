@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/constants/app_constants.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../data/services/leancloud_update_service.dart';
 
 class UpdateState {
@@ -53,21 +53,42 @@ class UpdateNotifier extends StateNotifier<UpdateState> {
   }
 
   Future<void> check() async {
+    print('[UpdateProvider] 🔍 开始检查更新...');
+
     final service = await LeanCloudUpdateService.create();
-    if (service == null) return;
+    if (service == null) {
+      print('[UpdateProvider] ❌ LeanCloudUpdateService 创建失败');
+      return;
+    }
+
+    // 获取当前应用版本
+    final packageInfo = await PackageInfo.fromPlatform();
+    final currentVersion = packageInfo.version;
+    print('[UpdateProvider] 📱 当前版本: $currentVersion');
+
     try {
       final items = await service.fetchConfig();
+      print('[UpdateProvider] 📋 获取到配置项: ${items.length} 个');
+
       final active = {for (final it in items) it['key']: it};
       final enabledRaw = active['version_check_enabled']?['value'] ?? 'true';
       final enabled = enabledRaw.toString() == 'true';
-      final target = (active['app_version']?['value'] ?? AppConstants.version).toString();
-      final cmp = _compareVersions(AppConstants.version, target);
+      final target = (active['app_version']?['value'] ?? currentVersion).toString();
+      final cmp = _compareVersions(currentVersion, target);
       final title = (active['update_title']?['value'] ?? '发现新版本').toString();
       final message = (active['update_message']?['value'] ?? '').toString();
       final url = (active['download_url']?['value'] ?? '').toString();
       final type = (active['update_type']?['value'] ?? 'optional').toString();
 
+      print('[UpdateProvider] 📊 版本对比:');
+      print('  - 当前版本: $currentVersion');
+      print('  - 目标版本: $target');
+      print('  - 比较结果: $cmp (< 0 表示需要更新)');
+      print('  - 检查开关: $enabled');
+      print('  - 更新类型: $type');
+
       if (enabled && cmp < 0) {
+        print('[UpdateProvider] ✅ 需要更新！设置状态...');
         state = state.copyWith(
           needsUpdate: true,
           force: type == 'force',
@@ -76,9 +97,13 @@ class UpdateNotifier extends StateNotifier<UpdateState> {
           downloadUrl: url,
           targetVersion: target,
         );
+        print('[UpdateProvider] 状态已更新: needsUpdate=${state.needsUpdate}');
+      } else {
+        print('[UpdateProvider] ℹ️ 无需更新');
       }
-    } catch (e) {
-      // 可选：打印简要日志
+    } catch (e, stackTrace) {
+      print('[UpdateProvider] ❌ 检查更新失败: $e');
+      print('[UpdateProvider] 堆栈: $stackTrace');
     }
   }
 

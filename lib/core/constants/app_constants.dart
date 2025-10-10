@@ -1,6 +1,7 @@
 class AppConstants {
   static const String appName = 'HMusic';
-  static const String version = '2.0.0';
+  // 版本号从 package_info_plus 动态获取，不在此硬编码
+  // 使用时通过 PackageInfo.fromPlatform() 获取实际版本
 
   // 网络配置
   static const int connectTimeout = 20;

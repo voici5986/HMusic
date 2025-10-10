@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../pages/login_page.dart';
 import '../pages/main_page.dart';
@@ -24,10 +25,15 @@ class AuthWrapper extends ConsumerStatefulWidget {
 class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   bool _jsPreloadAttempted = false;
   bool _isFirstFrame = true;
+  bool _updateChecked = false;
 
   @override
   void initState() {
     super.initState();
+
+    // ✅ iOS已在原生层触发网络权限，这里直接检查更新
+    print('[AuthWrapper] 🔍 开始初始化流程...');
+    _checkForUpdates();
 
     // 使用postFrameCallback确保在第一帧渲染后执行
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -38,12 +44,57 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
     });
   }
 
+  /// 检查应用更新
+  Future<void> _checkForUpdates() async {
+    if (_updateChecked) return;
+
+    print('[AuthWrapper] 🔍 开始检查更新...');
+
+    try {
+      // 先写入LeanCloud配置（更新检查需要这些配置）
+      await _writeLeanCloudConfig();
+
+      final upd = ref.read(updateProvider.notifier);
+      await upd.check();
+
+      final state = ref.read(updateProvider);
+      print('[AuthWrapper] 📋 更新检查完成:');
+      print('  - needsUpdate: ${state.needsUpdate}');
+      print('  - targetVersion: ${state.targetVersion}');
+      print('  - force: ${state.force}');
+    } catch (e) {
+      print('[AuthWrapper] ⚠️ 版本检查失败: $e');
+    } finally {
+      // 更新检查完成，触发重新构建
+      if (mounted) {
+        print('[AuthWrapper] ✅ 更新检查完成，触发重新构建');
+        setState(() {
+          _updateChecked = true;
+        });
+      }
+    }
+  }
+
+  /// 写入LeanCloud配置到SharedPreferences
+  Future<void> _writeLeanCloudConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('lc_base_url', 'https://nu0cttse.lc-cn-n1-shared.com');
+      await prefs.setString('lc_app_id', 'nu0CtTsesxoThR70g4Vn9Ypk-gzGzoHsz');
+      await prefs.setString('lc_app_key', 'WNNq0Z9pluoS8CRnrqu822xl');
+      print('[AuthWrapper] ✅ LeanCloud配置已写入');
+    } catch (e) {
+      print('[AuthWrapper] ⚠️ 写入LeanCloud配置失败: $e');
+    }
+  }
+
   /// 初始化音频服务
   Future<void> _initializeAudioService() async {
     try {
-      // 先检查更新
-      final upd = ref.read(updateProvider.notifier);
-      await upd.check();
+      // 等待更新检查完成
+      while (!_updateChecked) {
+        await Future.delayed(const Duration(milliseconds: 50));
+      }
 
       // 如果需要更新，则不执行后续初始化
       final s = ref.read(updateProvider);
@@ -138,7 +189,22 @@ class _AuthWrapperState extends ConsumerState<AuthWrapper> {
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
     final updState = ref.watch(updateProvider);
+
+    print('[AuthWrapper] 🎨 build - _updateChecked: $_updateChecked, needsUpdate: ${updState.needsUpdate}');
+
+    // 等待更新检查完成后再决定显示什么
+    // 如果还在检查中，显示空白页面或加载指示器
+    if (!_updateChecked) {
+      print('[AuthWrapper] ⏳ 显示加载指示器（等待更新检查）');
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
     if (updState.needsUpdate) {
+      print('[AuthWrapper] 🔄 显示更新页面');
       return UpdatePage(
         title: updState.title,
         message: updState.message,

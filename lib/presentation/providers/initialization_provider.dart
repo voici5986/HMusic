@@ -149,10 +149,7 @@ class InitializationNotifier extends StateNotifier<InitializationState> {
     try {
       debugPrint('📱 [Initialization] 开始请求权限...');
 
-      // iOS平台：先触发网络权限弹窗（国际区iOS需要）
-      if (Platform.isIOS) {
-        await _triggerNetworkPermission();
-      }
+      // iOS平台：网络权限已在AuthWrapper中提前触发，这里不再重复
 
       // 请求通知权限
       debugPrint('📱 [Initialization] 请求通知权限...');
@@ -172,32 +169,6 @@ class InitializationNotifier extends StateNotifier<InitializationState> {
       debugPrint('⚠️ [Initialization] 权限请求失败: $e');
       debugPrint('⚠️ [Initialization] 堆栈跟踪: $stackTrace');
       // 权限失败不影响继续
-    }
-  }
-
-  /// 触发iOS网络权限弹窗（国际区iOS需要）
-  /// 通过发起一个简单的网络请求来触发系统的WiFi/蜂窝数据权限对话框
-  Future<void> _triggerNetworkPermission() async {
-    try {
-      debugPrint('🌐 [Initialization] 触发iOS网络权限检查...');
-
-      // 创建一个简单的HTTP请求来触发网络权限弹窗
-      // 使用一个可靠的轻量级端点
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 3);
-
-      try {
-        final request = await client.getUrl(Uri.parse('https://www.apple.com/library/test/success.html'));
-        final response = await request.close();
-        debugPrint('🌐 [Initialization] 网络连接成功，状态码: ${response.statusCode}');
-        await response.drain();
-      } catch (e) {
-        debugPrint('🌐 [Initialization] 网络请求失败（可能是用户拒绝权限或网络不可用）: $e');
-      } finally {
-        client.close();
-      }
-    } catch (e) {
-      debugPrint('⚠️ [Initialization] 触发网络权限失败: $e');
     }
   }
 }

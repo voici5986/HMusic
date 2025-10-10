@@ -49,5 +49,28 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>HMusic 需要访问您的媒体库以播放音乐</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>HMusic 需要使用麦克风以支持语音控制功能</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>HMusic 不会收集您的个人数据，此权限仅用于提供更好的音乐播放体验</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>HMusic 需要访问本地网络以连接到音乐服务器</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_services._dns-sd._udp</string>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>HMusic 需要访问相册以保存专辑封面</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>HMusic 需要访问相册以保存专辑封面</string>
 </dict>
 </plist>
