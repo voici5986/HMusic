@@ -55,6 +55,7 @@ class MusicLibraryState {
 class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
   final Ref ref;
   AlbumCoverService? _albumCoverService; // 封面图服务
+  Set<String> _fetchedCovers = {}; // 🔧 记录已获取封面的歌曲，避免重复获取
 
   MusicLibraryNotifier(this.ref) : super(const MusicLibraryState()) {
     debugPrint('MusicLibraryProvider: 初始化完成');
@@ -109,8 +110,20 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
       debugPrint('MusicLibrary: 数据加载完成，状态已更新');
 
       // 🖼️ 异步获取所有歌曲的封面图（不阻塞UI）
+      // 🔧 只在首次加载或有新歌曲时才获取封面
       if (musicList.isNotEmpty) {
-        _fetchAlbumCoversAsync(musicList, apiService);
+        // 找出未获取封面的歌曲
+        final needsFetchList = musicList.where((music) {
+          return !_fetchedCovers.contains(music.name) &&
+              (music.picture == null || music.picture!.isEmpty);
+        }).toList();
+
+        if (needsFetchList.isNotEmpty) {
+          debugPrint('🖼️ [MusicLibrary] 发现 ${needsFetchList.length} 首歌曲需要获取封面');
+          _fetchAlbumCoversAsync(needsFetchList, apiService);
+        } else {
+          debugPrint('🖼️ [MusicLibrary] 所有歌曲封面已缓存，跳过获取');
+        }
       }
     } catch (e) {
       debugPrint('MusicLibrary: 获取音乐列表失败: $e');
@@ -455,6 +468,7 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
       // 如果歌曲已经有封面图，跳过
       if (music.picture != null && music.picture!.isNotEmpty) {
         debugPrint('🖼️ [MusicLibrary] 跳过已有封面的歌曲: ${music.name}');
+        _fetchedCovers.add(music.name); // 🔧 标记为已获取
         return;
       }
 
@@ -469,6 +483,9 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
 
       if (coverUrl != null && coverUrl.isNotEmpty) {
         debugPrint('✅ [MusicLibrary] 封面图获取成功: ${music.name}');
+
+        // 🔧 标记为已获取（成功）
+        _fetchedCovers.add(music.name);
 
         // 更新 Music 对象的 picture 字段
         final updatedMusic = Music(
@@ -496,9 +513,13 @@ class MusicLibraryNotifier extends StateNotifier<MusicLibraryState> {
         );
       } else {
         debugPrint('⚠️ [MusicLibrary] 未找到封面图: ${music.name}');
+        // 🔧 标记为已尝试获取（失败），避免重复尝试
+        _fetchedCovers.add(music.name);
       }
     } catch (e) {
       debugPrint('❌ [MusicLibrary] 获取封面图失败: ${music.name}, 错误: $e');
+      // 🔧 标记为已尝试获取（失败），避免重复尝试
+      _fetchedCovers.add(music.name);
       // 静默失败，不影响其他歌曲
     }
   }
