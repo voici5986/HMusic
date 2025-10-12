@@ -18,6 +18,9 @@ class MusicApiService {
 
   MusicApiService(this._client);
 
+  /// 获取登录时的服务器地址（用于URL替换）
+  String get baseUrl => _client.baseUrl;
+
   Future<Map<String, dynamic>> getVersion() async {
     final response = await _client.get('/getversion');
     return response.data as Map<String, dynamic>;

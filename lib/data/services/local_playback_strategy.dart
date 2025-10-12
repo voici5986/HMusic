@@ -321,6 +321,9 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
         debugPrint('🎵 [LocalPlayback] 获取到播放链接: $playUrl');
       }
 
+      // 🔧 将内网地址替换为登录时的域名
+      playUrl = _replaceWithLoginDomain(playUrl);
+
       // 先更新状态和缓存
       _currentMusicName = musicName;
       _currentMusicUrl = playUrl;
@@ -634,6 +637,42 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
       debugPrint('   - URL: $_currentMusicUrl');
     } catch (e) {
       debugPrint('❌ [LocalPlayback] 保存缓存失败: $e');
+    }
+  }
+
+  /// 🔧 将NAS返回的内网地址替换为登录时的域名
+  ///
+  /// 例如：
+  /// - NAS返回: http://192.168.31.2:8090/music/download/song.mp3
+  /// - 登录地址: https://music.example.com:8443
+  /// - 替换后: https://music.example.com:8443/music/download/song.mp3
+  String _replaceWithLoginDomain(String nasUrl) {
+    try {
+      // 获取登录时保存的服务器地址
+      final loginBaseUrl = _apiService.baseUrl;
+      debugPrint('🔄 [LocalPlayback] URL替换:');
+      debugPrint('   - NAS URL: $nasUrl');
+      debugPrint('   - 登录地址: $loginBaseUrl');
+
+      final loginUri = Uri.parse(loginBaseUrl);
+      final nasUri = Uri.parse(nasUrl);
+
+      // 用登录地址的 scheme/host/port 替换NAS地址的对应部分
+      // 保留NAS地址的 path/query/fragment
+      final replacedUri = nasUri.replace(
+        scheme: loginUri.scheme, // http/https
+        host: loginUri.host,     // 域名或IP
+        port: loginUri.port,     // 端口（如果有）
+      );
+
+      final replacedUrl = replacedUri.toString();
+      debugPrint('   - 替换后: $replacedUrl');
+
+      return replacedUrl;
+    } catch (e) {
+      debugPrint('❌ [LocalPlayback] URL替换失败: $e');
+      // 替换失败时返回原URL
+      return nasUrl;
     }
   }
 }
