@@ -420,6 +420,58 @@ class NativeMusicSearchService {
   String _stripHtmlTags(String input) {
     return input.replaceAll(RegExp(r'<[^>]+>'), '');
   }
+
+  /// 获取 QQ 音乐歌词
+  Future<String?> getLyricsQQ(String songMid) async {
+    try {
+      debugPrint('🎤 [NativeSearch] 获取QQ音乐歌词: $songMid');
+
+      final response = await _dio.get(
+        'https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg',
+        queryParameters: {
+          'songmid': songMid,
+          'g_tk': '5381',
+          'format': 'json',
+          'inCharset': 'utf8',
+          'outCharset': 'utf-8',
+          'notice': '0',
+        },
+        options: Options(
+          headers: {
+            'Referer': 'https://y.qq.com/',
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        dynamic data = response.data;
+        if (data is String) {
+          data = jsonDecode(data);
+        }
+
+        if (data is Map && data['lyric'] != null) {
+          final base64Lyric = data['lyric'].toString();
+          // QQ音乐歌词是 base64 编码的
+          try {
+            final bytes = base64Decode(base64Lyric);
+            final lyric = utf8.decode(bytes);
+            debugPrint('✅ [NativeSearch] 获取歌词成功，长度: ${lyric.length}');
+            return lyric;
+          } catch (e) {
+            debugPrint('❌ [NativeSearch] 歌词解码失败: $e');
+          }
+        }
+      }
+
+      debugPrint('⚠️ [NativeSearch] 未找到歌词');
+      return null;
+    } catch (e) {
+      debugPrint('❌ [NativeSearch] 获取歌词异常: $e');
+      return null;
+    }
+  }
 }
 
 final nativeMusicSearchServiceProvider = Provider<NativeMusicSearchService>((

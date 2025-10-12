@@ -129,8 +129,20 @@ class AlbumCoverService {
                 debugPrint('✅ [AlbumCover] $platformName 找到有效封面，停止搜索');
                 debugPrint('   - 最终选择: 结果 ${i + 1}/${results.length}');
                 debugPrint('   - 封面URL: $coverUrl');
-                // TODO: 从 result.extra 中提取歌词（如果有）
-                return (coverUrl: coverUrl, lyrics: null);
+
+                // 🎤 尝试获取歌词（仅 QQ 音乐支持）
+                String? lyrics;
+                if (platformName == 'QQ音乐' && result.songId != null && result.songId!.isNotEmpty) {
+                  debugPrint('🎤 [AlbumCover] 尝试获取歌词: ${result.songId}');
+                  lyrics = await _nativeSearch.getLyricsQQ(result.songId!);
+                  if (lyrics != null && lyrics.isNotEmpty) {
+                    debugPrint('✅ [AlbumCover] 歌词获取成功，长度: ${lyrics.length} 字符');
+                  } else {
+                    debugPrint('⚠️ [AlbumCover] 未获取到歌词');
+                  }
+                }
+
+                return (coverUrl: coverUrl, lyrics: lyrics);
               } else {
                 debugPrint('⚠️ [AlbumCover] $platformName 封面URL验证失败，尝试下一个结果');
               }
