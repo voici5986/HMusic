@@ -323,6 +323,7 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
 
       // 🔧 将内网地址替换为登录时的域名
       playUrl = _replaceWithLoginDomain(playUrl);
+      debugPrint('✅ [LocalPlayback] 最终播放链接: $playUrl');
 
       // 先更新状态和缓存
       _currentMusicName = musicName;

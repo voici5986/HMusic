@@ -13,7 +13,6 @@ import '../../data/services/playback_strategy.dart';
 import '../../data/services/local_playback_strategy.dart';
 import '../../data/services/remote_playback_strategy.dart';
 import '../../data/services/album_cover_service.dart';
-import '../../data/services/unified_api_service.dart';
 import 'dio_provider.dart';
 import 'device_provider.dart';
 import 'music_library_provider.dart';
@@ -1430,9 +1429,10 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         }
 
         debugPrint('🔧 [AutoCover] 初始化 AlbumCoverService');
+        final nativeSearch = ref.read(nativeMusicSearchServiceProvider);
         _albumCoverService = AlbumCoverService(
-          unifiedApi: UnifiedApiService(),
           musicApi: apiService,
+          nativeSearch: nativeSearch,
         );
       }
 
