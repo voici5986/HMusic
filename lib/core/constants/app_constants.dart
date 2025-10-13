@@ -18,5 +18,5 @@ class AppConstants {
   static const String prefsSelectedDevice = 'selected_device';
 
   // 功能开关
-  static const bool enableSeek = false; // 已禁用：服务端不支持 /seek
+  static const bool enableSeek = true; // ✅ 已启用：本地播放支持 seek
 }

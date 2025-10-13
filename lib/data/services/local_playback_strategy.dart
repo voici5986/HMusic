@@ -513,6 +513,27 @@ class LocalPlaybackStrategy implements PlaybackStrategy {
       return;
     }
 
+    // 🔧 新增: 如果 URL 和歌曲名都相同，且播放器已就绪，跳过重新加载
+    final player = _ensurePlayer;
+    if (player != null &&
+        url == _currentMusicUrl &&
+        name == _currentMusicName &&
+        player.processingState != ProcessingState.idle &&
+        !autoPlay) {
+      debugPrint('✅ [LocalPlayback] URL 和歌曲名未变化，跳过重新加载');
+      debugPrint('   - URL: $url');
+      debugPrint('   - 歌曲: $name');
+      debugPrint('   - 播放器状态: ${player.processingState}');
+
+      // 只执行 seek（如果需要）
+      if (offset > 0 && player.position.inSeconds != offset) {
+        debugPrint('🎯 [LocalPlayback] 仅执行 seek 到: ${offset}s');
+        await player.seek(Duration(seconds: offset));
+        _emitCurrentStatus();
+      }
+      return;
+    }
+
     // 如果正在加载但歌曲名不同，说明是切歌操作，取消之前的加载
     if (_loading) {
       debugPrint('🔄 [LocalPlayback] 检测到切歌请求，取消上一次加载 ($_loadingMusicName -> $name)');

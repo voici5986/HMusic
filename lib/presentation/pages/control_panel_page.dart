@@ -25,6 +25,7 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
   Color? _dominantColor; // 封面主色调
   String? _lastCoverUrl; // 上一次的封面 URL
   String? _colorExtractedUrl; // 🔧 已提取颜色的封面 URL（防止重复提取）
+  double? _draggingValue; // 🔧 拖动进度条时的临时值
 
   @override
   void initState() {
@@ -701,8 +702,16 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final currentTime = currentMusic.offset ?? 0;
     final totalTime = currentMusic.duration ?? 0;
+
+    // 🔧 使用拖动值或实际进度值
+    final displayTime = _draggingValue != null
+        ? (_draggingValue! * totalTime).round()
+        : currentTime;
+
     final progress =
-        (totalTime > 0) ? (currentTime / totalTime).clamp(0.0, 1.0) : 0.0;
+        (totalTime > 0) ? (displayTime / totalTime).clamp(0.0, 1.0) : 0.0;
+
+    debugPrint('🎯 [ProgressBar] progress=$progress, currentTime=$currentTime, totalTime=$totalTime, dragging=${_draggingValue != null}');
 
     return Column(
       children: [
@@ -720,11 +729,22 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
           ),
           child: Slider(
             value: progress,
-            onChanged: AppConstants.enableSeek ? (value) {} : null,
+            onChanged: AppConstants.enableSeek ? (value) {
+              // 🔧 拖动时更新临时值,实时显示进度
+              debugPrint('🎯 [ProgressBar] onChanged: $value');
+              setState(() {
+                _draggingValue = value;
+              });
+            } : null,
             onChangeEnd:
                 AppConstants.enableSeek
                     ? (value) {
+                      // 🔧 拖动结束,清除临时值并执行 seek
                       final newPos = (value * totalTime).round();
+                      debugPrint('🎯 [ProgressBar] onChangeEnd: $value, seekTo: $newPos seconds');
+                      setState(() {
+                        _draggingValue = null;
+                      });
                       ref.read(playbackProvider.notifier).seekTo(newPos);
                     }
                     : null,
@@ -735,7 +755,7 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              _formatDuration(currentTime),
+              _formatDuration(displayTime),
               style: TextStyle(color: onSurface.withOpacity(0.7)),
             ),
             Text(
