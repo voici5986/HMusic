@@ -6,8 +6,10 @@ import '../providers/playback_provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../providers/auth_provider.dart';
 import '../providers/device_provider.dart';
+import '../providers/lyric_provider.dart';
 import '../../data/models/device.dart';
 import '../widgets/app_layout.dart';
+import 'lyrics_page.dart';
 
 class ControlPanelPage extends ConsumerStatefulWidget {
   final bool showAppBar;
@@ -562,58 +564,100 @@ class _ControlPanelPageState extends ConsumerState<ControlPanelPage>
     final glowColor = _dominantColor ?? Theme.of(context).colorScheme.primary;
 
     return Center(
-      child: RotationTransition(
-        turns: _albumAnimationController ?? kAlwaysCompleteAnimation,
-        child: Container(
-          width: artworkSize,
-          height: artworkSize,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: onSurface.withOpacity(0.05),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(isPlaying ? 0.35 : 0.2),
-                blurRadius: 30,
-                spreadRadius: 5,
-              ),
-              if (isPlaying)
+      child: GestureDetector(
+        onTap: () {
+          debugPrint('🎤 [点击封面] 触发点击事件');
+          _openLyricsPage();
+        },
+        behavior: HitTestBehavior.opaque, // 🔧 确保整个区域都可点击
+        child: RotationTransition(
+          turns: _albumAnimationController ?? kAlwaysCompleteAnimation,
+          child: Container(
+            width: artworkSize,
+            height: artworkSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: onSurface.withOpacity(0.05),
+              boxShadow: [
                 BoxShadow(
-                  color: glowColor.withOpacity(0.4),
-                  blurRadius: 50,
-                  spreadRadius: 10,
+                  color: Colors.black.withOpacity(isPlaying ? 0.35 : 0.2),
+                  blurRadius: 30,
+                  spreadRadius: 5,
                 ),
-            ],
-          ),
-          child: ClipOval(
-            child:
-                coverUrl != null && coverUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                      imageUrl: coverUrl,
-                      fit: BoxFit.cover,
-                      width: artworkSize,
-                      height: artworkSize,
-                      // 🎨 图片加载完成后,延迟提取颜色(确保图片已缓存)
-                      imageBuilder: (context, imageProvider) {
-                        // 🔧 只有当这个 URL 还没有提取过颜色时，才提取
-                        if (_colorExtractedUrl != coverUrl) {
-                          _colorExtractedUrl = coverUrl; // 立即标记，防止重复
-                          // 延迟提取颜色,避免与首次加载冲突
-                          Future.delayed(const Duration(milliseconds: 300), () {
-                            if (mounted && coverUrl == playbackState.albumCoverUrl) {
-                              _extractDominantColorFromProvider(imageProvider);
-                            }
-                          });
-                        }
-                        return Image(image: imageProvider, fit: BoxFit.cover);
-                      },
-                      placeholder: (context, url) => _buildDefaultArtwork(artworkSize, onSurface),
-                      errorWidget: (context, url, error) => _buildDefaultArtwork(artworkSize, onSurface),
-                    )
-                    : _buildDefaultArtwork(artworkSize, onSurface),
+                if (isPlaying)
+                  BoxShadow(
+                    color: glowColor.withOpacity(0.4),
+                    blurRadius: 50,
+                    spreadRadius: 10,
+                  ),
+              ],
+            ),
+            child: ClipOval(
+              child:
+                  coverUrl != null && coverUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                        imageUrl: coverUrl,
+                        fit: BoxFit.cover,
+                        width: artworkSize,
+                        height: artworkSize,
+                        // 🎨 图片加载完成后,延迟提取颜色(确保图片已缓存)
+                        imageBuilder: (context, imageProvider) {
+                          // 🔧 只有当这个 URL 还没有提取过颜色时，才提取
+                          if (_colorExtractedUrl != coverUrl) {
+                            _colorExtractedUrl = coverUrl; // 立即标记，防止重复
+                            // 延迟提取颜色,避免与首次加载冲突
+                            Future.delayed(const Duration(milliseconds: 300), () {
+                              if (mounted && coverUrl == playbackState.albumCoverUrl) {
+                                _extractDominantColorFromProvider(imageProvider);
+                              }
+                            });
+                          }
+                          return Image(image: imageProvider, fit: BoxFit.cover);
+                        },
+                        placeholder: (context, url) => _buildDefaultArtwork(artworkSize, onSurface),
+                        errorWidget: (context, url, error) => _buildDefaultArtwork(artworkSize, onSurface),
+                      )
+                      : _buildDefaultArtwork(artworkSize, onSurface),
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// 打开歌词页面
+  void _openLyricsPage() {
+    final current = ref.read(playbackProvider).currentMusic;
+
+    debugPrint('🎤 [打开歌词] 开始执行');
+    debugPrint('🎤 [打开歌词] 当前播放状态: ${current != null}');
+    debugPrint('🎤 [打开歌词] 歌曲名: ${current?.curMusic}');
+
+    if (current == null || current.curMusic.isEmpty) {
+      debugPrint('⚠️ [打开歌词] 当前没有播放歌曲,不打开歌词页面');
+      // 显示提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前没有播放歌曲'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    debugPrint('🎤 [打开歌词] 准备打开歌词页面: ${current.curMusic}');
+
+    // 加载歌词
+    ref.read(lyricProvider.notifier).loadLyrics(current.curMusic);
+
+    // 导航到歌词页面
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const LyricsPage(),
+      ),
+    );
+
+    debugPrint('✅ [打开歌词] 页面跳转完成');
   }
 
   /// 默认的专辑封面（音乐图标）

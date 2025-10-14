@@ -4,6 +4,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../providers/playback_provider.dart';
 import '../providers/device_provider.dart';
+import '../providers/lyric_provider.dart';
+import 'lyrics_page.dart';
 
 class NowPlayingPage extends ConsumerStatefulWidget {
   const NowPlayingPage({super.key});
@@ -101,62 +103,104 @@ class _NowPlayingPageState extends ConsumerState<NowPlayingPage> {
     final glowColor = _dominantColor ?? Theme.of(context).colorScheme.primary;
     debugPrint('🎨 当前光圈颜色: $glowColor (提取的颜色: $_dominantColor)');
 
-    return Container(
-      width: 260,
-      height: 260,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: onSurface.withOpacity(0.06),
-        boxShadow: [
-          BoxShadow(
-            color: glowColor.withOpacity(0.4),
-            blurRadius: 40,
-            spreadRadius: 8,
-          ),
-          BoxShadow(
-            color: Colors.black.withOpacity(0.15),
-            blurRadius: 30,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: coverUrl != null && coverUrl.isNotEmpty
-          ? ClipOval(
-              child: CachedNetworkImage(
-                imageUrl: coverUrl,
-                fit: BoxFit.cover,
-                // 🎨 图片加载完成后,延迟提取颜色(确保图片已缓存)
-                imageBuilder: (context, imageProvider) {
-                  // 🔧 只有当这个 URL 还没有提取过颜色时，才提取
-                  if (_colorExtractedUrl != coverUrl) {
-                    _colorExtractedUrl = coverUrl; // 立即标记，防止重复
-                    // 延迟提取颜色,避免与首次加载冲突
-                    Future.delayed(const Duration(milliseconds: 300), () {
-                      if (mounted && coverUrl == ref.read(playbackProvider).albumCoverUrl) {
-                        _extractDominantColorFromProvider(imageProvider);
-                      }
-                    });
-                  }
-                  return Image(image: imageProvider, fit: BoxFit.cover);
-                },
-                placeholder: (context, url) => Center(
-                  child: CircularProgressIndicator(
-                    color: glowColor,
+    return GestureDetector(
+      onTap: () {
+        debugPrint('🎤 [点击封面] 触发点击事件');
+        _openLyricsPage();
+      },
+      behavior: HitTestBehavior.opaque, // 🔧 确保整个区域都可点击
+      child: Container(
+        width: 260,
+        height: 260,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: onSurface.withOpacity(0.06),
+          boxShadow: [
+            BoxShadow(
+              color: glowColor.withOpacity(0.4),
+              blurRadius: 40,
+              spreadRadius: 8,
+            ),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 30,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: coverUrl != null && coverUrl.isNotEmpty
+            ? ClipOval(
+                child: CachedNetworkImage(
+                  imageUrl: coverUrl,
+                  fit: BoxFit.cover,
+                  // 🎨 图片加载完成后,延迟提取颜色(确保图片已缓存)
+                  imageBuilder: (context, imageProvider) {
+                    // 🔧 只有当这个 URL 还没有提取过颜色时，才提取
+                    if (_colorExtractedUrl != coverUrl) {
+                      _colorExtractedUrl = coverUrl; // 立即标记，防止重复
+                      // 延迟提取颜色,避免与首次加载冲突
+                      Future.delayed(const Duration(milliseconds: 300), () {
+                        if (mounted && coverUrl == ref.read(playbackProvider).albumCoverUrl) {
+                          _extractDominantColorFromProvider(imageProvider);
+                        }
+                      });
+                    }
+                    return Image(image: imageProvider, fit: BoxFit.cover);
+                  },
+                  placeholder: (context, url) => Center(
+                    child: CircularProgressIndicator(
+                      color: glowColor,
+                    ),
+                  ),
+                  errorWidget: (context, url, error) => Icon(
+                    Icons.music_note_rounded,
+                    size: 96,
+                    color: onSurface.withOpacity(0.8),
                   ),
                 ),
-                errorWidget: (context, url, error) => Icon(
-                  Icons.music_note_rounded,
-                  size: 96,
-                  color: onSurface.withOpacity(0.8),
-                ),
+              )
+            : Icon(
+                Icons.music_note_rounded,
+                size: 96,
+                color: onSurface.withOpacity(0.8),
               ),
-            )
-          : Icon(
-              Icons.music_note_rounded,
-              size: 96,
-              color: onSurface.withOpacity(0.8),
-            ),
+      ),
     );
+  }
+
+  /// 打开歌词页面
+  void _openLyricsPage() {
+    final current = ref.read(playbackProvider).currentMusic;
+
+    debugPrint('🎤 [打开歌词] 开始执行');
+    debugPrint('🎤 [打开歌词] 当前播放状态: ${current != null}');
+    debugPrint('🎤 [打开歌词] 歌曲名: ${current?.curMusic}');
+
+    if (current == null || current.curMusic.isEmpty) {
+      debugPrint('⚠️ [打开歌词] 当前没有播放歌曲,不打开歌词页面');
+      // 显示提示
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前没有播放歌曲'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    debugPrint('🎤 [打开歌词] 准备打开歌词页面: ${current.curMusic}');
+
+    // 加载歌词
+    ref.read(lyricProvider.notifier).loadLyrics(current.curMusic);
+
+    // 导航到歌词页面
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const LyricsPage(),
+      ),
+    );
+
+    debugPrint('✅ [打开歌词] 页面跳转完成');
   }
 
   Future<void> _extractDominantColor(String imageUrl) async {
