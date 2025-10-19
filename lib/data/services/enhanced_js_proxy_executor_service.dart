@@ -587,26 +587,39 @@ class EnhancedJSProxyExecutorService {
         (function() {
           try {
             console.log('[EnhancedJSProxy] 调用网络请求回调，请求ID: $requestId');
-            
+
             if (globalThis._pendingRequests['$requestId']) {
               const callback = globalThis._pendingRequests['$requestId'];
               delete globalThis._pendingRequests['$requestId'];
-              
+
               const response = ${jsonEncode(responseData)};
               console.log('[EnhancedJSProxy] 响应状态:', response.statusCode);
               console.log('API Response: ', response);
-              
-              // 执行回调
-              callback(null, response);
+
+              // 🔧 关键修复：为不同脚本提供兼容的响应格式
+              // 有些脚本期望直接收到 body，有些期望收到完整的 response 对象
+              // 我们同时提供两种格式，让回调函数选择使用
+              const compatResponse = {
+                ...response,
+                // 提供直接访问 body 的快捷方式
+                data: response.body,
+                // 兼容性：如果 body 是对象，将其属性展开到 response 上
+                ...(typeof response.body === 'object' ? response.body : {})
+              };
+
+              console.log('[EnhancedJSProxy] 兼容响应对象:', compatResponse);
+
+              // 执行回调（优先使用兼容格式）
+              callback(null, compatResponse);
               console.log('[EnhancedJSProxy] 回调执行完成');
-              
+
               // ✨ 双保险机制：如果 Promise 还没设置结果，网络回调作为后备
               // 策略：不判断具体的 code 值，只检查是否有有效结果
               // 让 JS 脚本负责业务逻辑判断，Flutter 只做快速缓存
-              if (!globalThis._promiseComplete && response.body && typeof response.body === 'object') {
+              if (!globalThis._promiseComplete && compatResponse.body && typeof compatResponse.body === 'object') {
                 // 尝试提取可能的结果字段
-                const result = response.body.data || response.body.url || response.body.result;
-                
+                const result = compatResponse.body.data || compatResponse.body.url || compatResponse.body.result;
+
                 if (result && typeof result === 'string' && result.length > 0) {
                   // 有明确的字符串结果，设置快速路径
                   globalThis._promiseResult = result;
@@ -786,9 +799,10 @@ class EnhancedJSProxyExecutorService {
         );
       } catch (_) {}
 
-      // 立即检查脚本执行后的状态
+      // 🔥 立即检查脚本执行后的状态（增强版诊断）
       final immediateCheck = _runtime!.evaluate('''
         JSON.stringify({
+          // 基础环境检查
           globalThisKeys: Object.keys(globalThis).filter(k => k.includes('lx') || k.includes('on') || k.includes('EVENT')),
           windowKeys: typeof window !== 'undefined' ? Object.keys(window).filter(k => k.includes('lx') || k.includes('on') || k.includes('EVENT')) : null,
           lxKeys: globalThis.lx ? Object.keys(globalThis.lx) : null,
@@ -797,10 +811,111 @@ class EnhancedJSProxyExecutorService {
           hasOnFunction: typeof globalThis.on === 'function',
           hasWindowLx: typeof window !== 'undefined' && typeof window.lx !== 'undefined',
           hasWindowOn: typeof window !== 'undefined' && typeof window.lx !== 'undefined' && typeof window.lx.on === 'function',
+
+          // 🔥 混淆脚本专项检查
+          obfuscationCheck: {
+            // 检查常见混淆变量名
+            hasShortVars: {
+              r: typeof globalThis.r !== 'undefined' ? typeof globalThis.r : null,
+              t: typeof globalThis.t !== 'undefined' ? typeof globalThis.t : null,
+              e: typeof globalThis.e !== 'undefined' ? typeof globalThis.e : null,
+              o: typeof globalThis.o !== 'undefined' ? typeof globalThis.o : null,
+              k: typeof globalThis.k !== 'undefined' ? typeof globalThis.k : null,
+            },
+            // 检查解构赋值是否成功
+            lxAccessible: typeof globalThis.lx !== 'undefined',
+            lxType: typeof globalThis.lx,
+            lxIsObject: typeof globalThis.lx === 'object',
+            lxHasOn: globalThis.lx && typeof globalThis.lx.on === 'function',
+            lxHasRequest: globalThis.lx && typeof globalThis.lx.request === 'function',
+            // 检查脚本是否尝试调用 on() 注册事件
+            attemptedRegistration: globalThis._lxHandlers && Object.keys(globalThis._lxHandlers).length > 0,
+            // 🔧 检查是否通过解构赋值创建了 r 变量（野花音源.js的模式）
+            rIsFunction: typeof globalThis.r === 'function',
+            rEqualsOn: globalThis.r === globalThis.on || (globalThis.lx && globalThis.r === globalThis.lx.on),
+            // 🔧 检查脚本的混淆模式
+            hasHexEncoding: (function() {
+              try {
+                // 检查脚本源码是否包含十六进制编码（形如 \\x6c 的模式）
+                const scriptContent = globalThis._currentScriptContent || '';
+                return scriptContent.includes('\\\\x');
+              } catch(e) { return false; }
+            })(),
+          },
+
           scriptExecuted: true
-        })
+        }, null, 2)
       ''');
-      print('[EnhancedJSProxy] 🔍 脚本执行后立即检查: ${immediateCheck.stringResult}');
+      print('[EnhancedJSProxy] 🔍 脚本执行后立即检查:\n${immediateCheck.stringResult}');
+
+      // 🚀 自动修复：如果检测到混淆脚本使用了解构赋值但未成功注册处理器
+      try {
+        final checkData = jsonDecode(immediateCheck.stringResult) as Map<String, dynamic>;
+        final obfuscationCheck = checkData['obfuscationCheck'] as Map<String, dynamic>?;
+        final attemptedRegistration = obfuscationCheck?['attemptedRegistration'] == true;
+        final rIsFunction = obfuscationCheck?['rIsFunction'] == true;
+
+        print('[EnhancedJSProxy] 🔍 混淆检测结果: rIsFunction=$rIsFunction, attemptedRegistration=$attemptedRegistration');
+
+        if (rIsFunction && !attemptedRegistration) {
+          print('[EnhancedJSProxy] 🔧 检测到混淆脚本使用解构赋值但未注册处理器');
+          print('[EnhancedJSProxy] 🔧 可能原因：脚本使用了异步注册或setTimeout延迟注册');
+
+          // 🔥 核心修复：手动触发一次 inited 事件到所有可能的监听器
+          _runtime!.evaluate('''
+            (function() {
+              try {
+                console.log('[EnhancedJSProxy-AutoFix] 尝试触发延迟注册...');
+
+                // 方式1: 如果脚本定义了 r 变量（解构赋值的 on 函数）
+                if (typeof globalThis.r === 'function') {
+                  console.log('[EnhancedJSProxy-AutoFix] 发现 r 变量，尝试通过它触发注册');
+                  // 检查是否有未注册的监听器
+                  if (typeof globalThis.e === 'object' && globalThis.e.inited) {
+                    console.log('[EnhancedJSProxy-AutoFix] 触发 inited 事件');
+                    // 模拟脚本可能需要的初始化事件
+                  }
+                }
+
+                // 方式2: 检查是否有全局的初始化函数
+                const initFunctions = ['init', 'initialize', 'onInit', 'onReady', 'ready'];
+                for (const fname of initFunctions) {
+                  if (typeof globalThis[fname] === 'function') {
+                    console.log('[EnhancedJSProxy-AutoFix] 调用初始化函数:', fname);
+                    try {
+                      globalThis[fname]();
+                    } catch (e) {
+                      console.log('[EnhancedJSProxy-AutoFix] 初始化函数执行失败:', e.message);
+                    }
+                  }
+                }
+
+                console.log('[EnhancedJSProxy-AutoFix] 延迟注册触发完成');
+                return true;
+              } catch (e) {
+                console.error('[EnhancedJSProxy-AutoFix] 触发延迟注册失败:', e);
+                return false;
+              }
+            })()
+          ''');
+
+          // 等待脚本完成异步初始化（某些混淆脚本可能在setTimeout中注册）
+          await Future.delayed(const Duration(milliseconds: 800));
+
+          // 再次检查是否成功注册
+          final delayedCheck = _runtime!.evaluate('''
+            JSON.stringify({
+              handlersAfterDelay: globalThis._lxHandlers,
+              requestHandlerCount: globalThis._lxHandlers && globalThis._lxHandlers.request ?
+                (Array.isArray(globalThis._lxHandlers.request) ? globalThis._lxHandlers.request.length : 1) : 0,
+              allHandlerKeys: globalThis._lxHandlers ? Object.keys(globalThis._lxHandlers) : []
+            })
+          ''');
+          print('[EnhancedJSProxy] 🔍 延迟后再次检查: ${delayedCheck.stringResult}');
+        }
+      } catch (e) {
+        print('[EnhancedJSProxy] ⚠️ 混淆脚本检测失败（继续执行）: $e');
+      }
 
       // 等待脚本初始化
       await Future.delayed(const Duration(milliseconds: 1000));
