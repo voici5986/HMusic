@@ -604,7 +604,22 @@ class MiIoTService {
       message: {'media': 'app_ios'},
       returnResult: true,
     );
-    return result;
+
+    // 🎯 解析 info 字符串（API返回的是JSON字符串，需要二次解析）
+    if (result != null && result is Map) {
+      final info = result['info'];
+      if (info != null && info is String) {
+        try {
+          final parsed = jsonDecode(info) as Map<String, dynamic>;
+          print('✅ [MiIoT] 播放状态解析成功: status=${parsed['status']}, position=${parsed['play_song_detail']?['position']}');
+          return parsed;
+        } catch (e) {
+          print('❌ [MiIoT] 解析播放状态info失败: $e');
+        }
+      }
+    }
+
+    return result is Map<String, dynamic> ? result : null;
   }
 
   /// 发送播放控制指令（播放/暂停/停止）

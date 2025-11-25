@@ -62,13 +62,15 @@ fi
 
 # 询问构建选项
 echo "📱 构建选项："
-echo "  1. 仅构建 Android APK (推荐，兼容所有设备)"
-echo "  2. 仅构建 Android APK (仅arm64，体积小)"
-echo "  3. 仅构建 iOS IPA"
-echo "  4. 构建 Android + iOS"
+echo "  1. 仅构建 Android APK - 通用版 (推荐，单文件兼容所有设备)"
+echo "  2. 仅构建 Android APK - 分架构版 (生成多个APK，体积更小)"
+echo "  3. 仅构建 Android APK - 仅arm64 (现代设备，体积小)"
+echo "  4. 仅构建 iOS IPA"
+echo "  5. 构建 Android 通用版 + iOS"
+echo "  6. 构建 Android 分架构版 + iOS"
 echo ""
-read -p "请选择 (1-4, 默认4): " build_choice
-build_choice=${build_choice:-4}
+read -p "请选择 (1-6, 默认5): " build_choice
+build_choice=${build_choice:-5}
 
 echo ""
 echo "======================================"
@@ -85,10 +87,10 @@ flutter pub get
 mkdir -p build/release
 mkdir -p build/symbols
 
-# 构建 Android
-if [[ "$build_choice" == "1" || "$build_choice" == "4" ]]; then
+# 构建 Android 通用版
+if [[ "$build_choice" == "1" || "$build_choice" == "5" ]]; then
     echo ""
-    echo "📱 构建 Android APK (全架构)..."
+    echo "📱 构建 Android APK (通用版)..."
     echo "  - 包含架构: arm64-v8a, armeabi-v7a, x86_64"
     echo "  - 混淆: ✅"
     echo "  - 签名: ✅"
@@ -100,15 +102,56 @@ if [[ "$build_choice" == "1" || "$build_choice" == "4" ]]; then
 
     # 复制到release目录并重命名
     cp build/app/outputs/flutter-apk/app-release.apk \
-       build/release/HMusic-v${VERSION}-android-signed.apk
+       build/release/HMusic-v${VERSION}-android-universal.apk
 
-    echo "✅ Android APK 构建完成"
-    echo "  文件: build/release/HMusic-v${VERSION}-android-signed.apk"
-    echo "  大小: $(du -h build/release/HMusic-v${VERSION}-android-signed.apk | cut -f1)"
+    echo "✅ Android APK (通用版) 构建完成"
+    echo "  文件: build/release/HMusic-v${VERSION}-android-universal.apk"
+    echo "  大小: $(du -h build/release/HMusic-v${VERSION}-android-universal.apk | cut -f1)"
     echo ""
 fi
 
-if [[ "$build_choice" == "2" ]]; then
+# 构建 Android 分架构版
+if [[ "$build_choice" == "2" || "$build_choice" == "6" ]]; then
+    echo ""
+    echo "📱 构建 Android APK (分架构版)..."
+    echo "  - 为每个架构生成独立APK"
+    echo "  - 架构: arm64-v8a, armeabi-v7a, x86_64"
+    echo "  - 混淆: ✅"
+    echo "  - 签名: ✅"
+    echo ""
+
+    flutter build apk --release \
+      --split-per-abi \
+      --obfuscate \
+      --split-debug-info=build/symbols
+
+    # 复制所有分架构APK到release目录
+    echo "📦 复制分架构APK..."
+    if [ -f "build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" ]; then
+        cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+           build/release/HMusic-v${VERSION}-android-arm64-v8a.apk
+        echo "  ✅ arm64-v8a: $(du -h build/release/HMusic-v${VERSION}-android-arm64-v8a.apk | cut -f1)"
+    fi
+
+    if [ -f "build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk" ]; then
+        cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+           build/release/HMusic-v${VERSION}-android-armeabi-v7a.apk
+        echo "  ✅ armeabi-v7a: $(du -h build/release/HMusic-v${VERSION}-android-armeabi-v7a.apk | cut -f1)"
+    fi
+
+    if [ -f "build/app/outputs/flutter-apk/app-x86_64-release.apk" ]; then
+        cp build/app/outputs/flutter-apk/app-x86_64-release.apk \
+           build/release/HMusic-v${VERSION}-android-x86_64.apk
+        echo "  ✅ x86_64: $(du -h build/release/HMusic-v${VERSION}-android-x86_64.apk | cut -f1)"
+    fi
+
+    echo ""
+    echo "✅ Android APK (分架构版) 构建完成"
+    echo ""
+fi
+
+# 构建 Android 单架构 (仅arm64)
+if [[ "$build_choice" == "3" ]]; then
     echo ""
     echo "📱 构建 Android APK (仅arm64)..."
     echo "  - 包含架构: arm64-v8a (现代设备)"
@@ -132,7 +175,7 @@ if [[ "$build_choice" == "2" ]]; then
 fi
 
 # 构建 iOS
-if [[ "$build_choice" == "3" || "$build_choice" == "4" ]]; then
+if [[ "$build_choice" == "4" || "$build_choice" == "5" || "$build_choice" == "6" ]]; then
     echo ""
     echo "🍎 构建 iOS IPA..."
     echo "  - 架构: arm64"

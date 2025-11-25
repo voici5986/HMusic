@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../providers/playback_provider.dart';
 import '../providers/device_provider.dart';
+import '../providers/direct_mode_provider.dart'; // 🎯 直连模式Provider
 import '../providers/lyric_provider.dart';
 import 'lyrics_page.dart';
 
@@ -357,8 +358,21 @@ class _Controls extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(playbackProvider);
-    final enabled =
-        ref.read(deviceProvider).selectedDeviceId != null && !state.isLoading;
+    final playbackMode = ref.watch(playbackModeProvider);
+
+    // 🎯 根据播放模式检查设备是否可用
+    bool hasDevice = false;
+    if (playbackMode == PlaybackMode.miIoTDirect) {
+      // 直连模式：检查是否已登录且选择了设备
+      final directState = ref.watch(directModeProvider);
+      hasDevice = directState is DirectModeAuthenticated &&
+          directState.selectedDeviceId != null;
+    } else {
+      // xiaomusic 模式：检查是否选择了设备
+      hasDevice = ref.read(deviceProvider).selectedDeviceId != null;
+    }
+
+    final enabled = hasDevice && !state.isLoading;
     final isPlaying = state.currentMusic?.isPlaying ?? false;
 
     return Row(

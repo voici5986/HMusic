@@ -161,6 +161,8 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
   static const String _localPlaybackKey = 'local_playback_state';
   static const String _localPlaybackUrlKey = 'local_playback_url';
   static const String _localPlaybackCoverKey = 'local_playback_cover';
+  static const String _directModePlaybackKey = 'direct_mode_playback_state'; // 🆕 直连模式专用
+  static const String _directModePlaybackCoverKey = 'direct_mode_playback_cover'; // 🆕 直连模式专用
 
   // 🔧 缓存的播放状态（待策略初始化后恢复）
   PlayingMusic? _cachedPlayingMusic;
@@ -382,45 +384,44 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
       debugPrint('🎵 [PlaybackProvider] 创建直连模式策略实例');
 
-      // 创建直连模式策略
+      // 🔧 创建直连模式策略（在构造函数中直接传入回调，避免 NULL 问题）
       final directStrategy = MiIoTDirectPlaybackStrategy(
         miService: directState.miService,
         deviceId: deviceId,
         deviceName: device.name,
         audioHandler: LocalPlaybackStrategy.sharedAudioHandler,
-      );
+        // 🔧 直接在构造时设置状态变化回调，确保轮询启动前回调已就绪
+        onStatusChanged: () async {
+          debugPrint('🔔 [PlaybackProvider] 直连模式状态变化');
+          await refreshStatus(silent: true);
 
-      debugPrint('✅ [PlaybackProvider] 直连模式策略实例已创建');
+          // 💾 保存直连模式播放状态（每次状态变化都保存）
+          if (state.currentMusic != null && state.currentMusic!.curMusic.isNotEmpty) {
+            await _saveDirectModePlayback(state.currentMusic!);
+          }
+        },
+        // 🔧 直接在构造时设置获取音乐URL的回调
+        onGetMusicUrl: (musicName) async {
+          try {
+            debugPrint('🔍 [PlaybackProvider] 获取音乐URL: $musicName');
+            final apiService = ref.read(apiServiceProvider);
+            if (apiService == null) {
+              debugPrint('❌ [PlaybackProvider] API服务为null');
+              return null;
+            }
 
-      // 设置状态变化回调
-      directStrategy.onStatusChanged = () {
-        debugPrint('🔔 [PlaybackProvider] 直连模式状态变化');
-        refreshStatus(silent: true);
-      };
-
-      debugPrint('✅ [PlaybackProvider] 状态变化回调已设置');
-
-      // 🎵 设置获取音乐URL的回调
-      directStrategy.onGetMusicUrl = (musicName) async {
-        try {
-          debugPrint('🔍 [PlaybackProvider] 获取音乐URL: $musicName');
-          final apiService = ref.read(apiServiceProvider);
-          if (apiService == null) {
-            debugPrint('❌ [PlaybackProvider] API服务为null');
+            final musicInfo = await apiService.getMusicInfo(musicName);
+            final url = musicInfo['url']?.toString();
+            debugPrint('✅ [PlaybackProvider] 获取到URL: $url');
+            return url;
+          } catch (e) {
+            debugPrint('❌ [PlaybackProvider] 获取音乐URL失败: $e');
             return null;
           }
+        },
+      );
 
-          final musicInfo = await apiService.getMusicInfo(musicName);
-          final url = musicInfo['url']?.toString();
-          debugPrint('✅ [PlaybackProvider] 获取到URL: $url');
-          return url;
-        } catch (e) {
-          debugPrint('❌ [PlaybackProvider] 获取音乐URL失败: $e');
-          return null;
-        }
-      };
-
-      debugPrint('✅ [PlaybackProvider] URL获取回调已设置');
+      debugPrint('✅ [PlaybackProvider] 直连模式策略实例已创建（回调已同步设置）');
 
       // 🎵 设置播放列表（从音乐库获取）
       try {
@@ -461,6 +462,18 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
       debugPrint('✅ [PlaybackProvider] 直连模式策略切换完成');
       debugPrint('✅ [PlaybackProvider] 当前策略是否为null: ${_currentStrategy == null}');
+
+      // 🔊 获取并显示真实音量
+      try {
+        final volume = await directStrategy.getVolume();
+        state = state.copyWith(volume: volume);
+        debugPrint('🔊 [PlaybackProvider] 音量已更新到UI: $volume');
+      } catch (e) {
+        debugPrint('❌ [PlaybackProvider] 获取音量失败: $e');
+      }
+
+      // 💾 尝试恢复缓存的播放状态（直连模式专用）
+      await _restoreDirectModePlayback();
     } catch (e, stackTrace) {
       debugPrint('❌ [PlaybackProvider] 切换直连模式策略失败: $e');
       debugPrint('❌ [PlaybackProvider] 堆栈: ${stackTrace.toString().split('\n').take(5).join('\n')}');
@@ -784,6 +797,46 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         }
       } catch (e) {
         debugPrint('❌ [PlaybackProvider] 获取本地播放状态失败: $e');
+      }
+      return;
+    }
+
+    // 🎯 直连模式：从策略获取状态（不依赖 xiaomusic API）
+    if (_currentStrategy is MiIoTDirectPlaybackStrategy) {
+      debugPrint('🎵 [PlaybackProvider] 直连模式，从策略获取状态');
+
+      try {
+        final status = await _currentStrategy!.getCurrentStatus();
+        debugPrint('🎵 [PlaybackProvider] 直连模式状态: ${status?.curMusic}, 播放中=${status?.isPlaying}');
+
+        if (status != null) {
+          // 🎯 检测歌曲切换
+          bool isSongChanged = false;
+          if (state.currentMusic != null && status.curMusic.isNotEmpty) {
+            if (state.currentMusic!.curMusic != status.curMusic) {
+              isSongChanged = true;
+              debugPrint('🎵 [PlaybackProvider] 直连模式检测到歌曲切换');
+            }
+          }
+
+          state = state.copyWith(
+            currentMusic: status,
+            hasLoaded: true,
+            isLoading: silent ? state.isLoading : false,
+            albumCoverUrl: isSongChanged ? null : state.albumCoverUrl,
+          );
+
+          // 🖼️ 自动搜索封面图
+          if (status.curMusic.isNotEmpty &&
+              (state.albumCoverUrl == null || state.albumCoverUrl!.isEmpty)) {
+            debugPrint('🖼️ [PlaybackProvider-直连] ✅ 触发封面自动搜索: ${status.curMusic}');
+            _autoFetchAlbumCover(status.curMusic).catchError((e) {
+              debugPrint('🖼️ [AutoCover] 异步搜索封面失败: $e');
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint('❌ [PlaybackProvider] 获取直连模式状态失败: $e');
       }
       return;
     }
@@ -1431,12 +1484,12 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
 
       // 🖼️ 处理封面图（4种情况）
       if (albumCoverUrl != null && albumCoverUrl.isNotEmpty) {
-        // 情况1&3: 搜索音乐（本地/远程）- 直接使用搜索结果的封面图
+        // 情况1: 在线搜索音乐 - 直接使用搜索结果的封面图
         debugPrint('🖼️ [PlaybackProvider] 使用搜索结果的封面图: $albumCoverUrl');
         updateAlbumCover(albumCoverUrl);
-      } else if (musicName != null && musicName.isNotEmpty && url == null) {
-        // 情况2&4: 服务器音乐（本地/远程）- 需要自动搜索封面
-        debugPrint('🖼️ [PlaybackProvider] 服务器音乐，自动搜索封面: $musicName');
+      } else if (musicName != null && musicName.isNotEmpty) {
+        // 情况2/3/4: 服务器音乐 / 本地音乐 / 直连模式 - 都需要自动搜索封面
+        debugPrint('🖼️ [PlaybackProvider] 自动搜索封面: $musicName (当前策略: ${_currentStrategy?.runtimeType})');
         _autoFetchAlbumCover(musicName).catchError((e) {
           debugPrint('🖼️ [AutoCover] 搜索封面失败: $e');
         });
@@ -1700,19 +1753,98 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     }
   }
 
+  /// 💾 保存直连模式播放状态（专用于直连模式）
+  Future<void> _saveDirectModePlayback(PlayingMusic status) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final data = {
+        'ret': status.ret,
+        'curMusic': status.curMusic,
+        'curPlaylist': status.curPlaylist,
+        'isPlaying': status.isPlaying,
+        'offset': status.offset,
+        'duration': status.duration,
+      };
+      await prefs.setString(_directModePlaybackKey, jsonEncode(data));
+
+      debugPrint('💾 [PlaybackProvider-DirectMode] 保存直连模式播放状态');
+      debugPrint('   - 歌曲名: ${status.curMusic}');
+      debugPrint('   - 播放状态: ${status.isPlaying ? "播放中" : "已暂停"}');
+      debugPrint('   - 进度: ${status.offset}s / ${status.duration}s');
+
+      // 保存封面图
+      if (state.albumCoverUrl != null && state.albumCoverUrl!.isNotEmpty) {
+        await prefs.setString(_directModePlaybackCoverKey, state.albumCoverUrl!);
+        debugPrint('   - ✅ 封面已保存');
+      }
+    } catch (e) {
+      debugPrint('❌ [PlaybackProvider-DirectMode] 保存播放状态失败: $e');
+    }
+  }
+
+  /// 🔄 恢复直连模式播放状态（专用于直连模式）
+  Future<void> _restoreDirectModePlayback() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString(_directModePlaybackKey);
+
+      if (jsonStr == null || jsonStr.isEmpty) {
+        debugPrint('⚠️ [PlaybackProvider-DirectMode] 没有缓存的播放状态');
+        return;
+      }
+
+      debugPrint('🔄 [PlaybackProvider-DirectMode] 开始恢复播放状态');
+
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final cachedMusic = PlayingMusic(
+        ret: data['ret'] as String? ?? 'OK',
+        curMusic: data['curMusic'] as String? ?? '',
+        curPlaylist: data['curPlaylist'] as String? ?? '直连播放',
+        isPlaying: false, // 恢复时总是暂停状态
+        offset: data['offset'] as int? ?? 0,
+        duration: data['duration'] as int? ?? 0,
+      );
+
+      // 恢复封面图
+      final cachedCover = prefs.getString(_directModePlaybackCoverKey);
+
+      // 更新UI状态
+      state = state.copyWith(
+        currentMusic: cachedMusic,
+        albumCoverUrl: cachedCover,
+        hasLoaded: true,
+        isLoading: false,
+      );
+
+      debugPrint('✅ [PlaybackProvider-DirectMode] 播放状态已恢复');
+      debugPrint('   - 歌曲名: ${cachedMusic.curMusic}');
+      debugPrint('   - 进度: ${cachedMusic.offset}s / ${cachedMusic.duration}s');
+      debugPrint('   - 封面: ${cachedCover ?? "无"}');
+
+      // 🎯 注意：不需要更新策略内部状态，因为轮询会自动更新
+      // 只是恢复 UI 显示，让用户看到上次播放的内容
+    } catch (e) {
+      debugPrint('❌ [PlaybackProvider-DirectMode] 恢复播放状态失败: $e');
+    }
+  }
+
   void updateAlbumCover(String coverUrl) {
     if (coverUrl.isNotEmpty) {
       state = state.copyWith(albumCoverUrl: coverUrl);
       print('[Playback] 🖼️  封面图已更新: $coverUrl');
 
-      // 🎵 如果是本地播放模式，同时更新通知栏封面
+      // 🎵 根据策略类型更新通知栏封面
       if (_currentStrategy is LocalPlaybackStrategy) {
+        // 本地播放模式
         (_currentStrategy as LocalPlaybackStrategy).setAlbumCover(coverUrl);
         (_currentStrategy as LocalPlaybackStrategy).refreshNotification();
-      }
-      // 🎵 如果是远程播放模式，也要更新通知栏封面
-      else if (_currentStrategy is RemotePlaybackStrategy) {
+      } else if (_currentStrategy is RemotePlaybackStrategy) {
+        // xiaomusic 远程播放模式
         (_currentStrategy as RemotePlaybackStrategy).updateAlbumCover(coverUrl);
+      } else if (_currentStrategy is MiIoTDirectPlaybackStrategy) {
+        // 🎯 直连模式：也要更新封面图到策略，用于通知栏显示
+        (_currentStrategy as MiIoTDirectPlaybackStrategy).setAlbumCover(coverUrl);
+        debugPrint('🖼️ [PlaybackProvider] 直连模式封面图已传给策略: $coverUrl');
       }
     }
   }
@@ -1792,7 +1924,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
     return true;
   }
 
-  /// 🖼️ 自动搜索并获取歌曲封面图（新版：支持上传到服务器）
+  /// 🖼️ 自动搜索并获取歌曲封面图（新版：支持无服务器模式）
   Future<void> _autoFetchAlbumCover(String songName) async {
     // 🔧 防止重复搜索同一首歌
     if (_searchingCoverForSong == songName) {
@@ -1822,14 +1954,33 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       debugPrint('🖼️ [AutoCover] ========== 开始获取封面 ==========');
       debugPrint('🖼️ [AutoCover] 歌曲名称: "$songName"');
 
+      final apiService = ref.read(apiServiceProvider);
+
+      // 🎯 判断是否为直连模式（无服务器）
+      if (apiService == null) {
+        // 🚀 无服务器模式：直接刮削在线封面
+        debugPrint('🔧 [AutoCover] 无服务器模式，直接刮削在线封面');
+        final coverUrl = await _scrapeAlbumCoverDirectly(songName);
+
+        if (coverUrl != null && coverUrl.isNotEmpty) {
+          debugPrint('✅ [AutoCover] 在线刮削成功: $coverUrl');
+
+          // 🎯 保存到内存缓存
+          _coverCache[songName] = coverUrl;
+          _saveCoverCache(); // 异步保存到本地，不阻塞主流程
+
+          // 更新封面图
+          updateAlbumCover(coverUrl);
+          debugPrint('✅ [AutoCover] 封面图已更新到UI');
+        } else {
+          debugPrint('⚠️ [AutoCover] 在线刮削失败，未找到封面');
+        }
+        return;
+      }
+
+      // 🎯 有服务器模式：使用 AlbumCoverService（支持服务器查询和上传）
       // 🔧 初始化 AlbumCoverService（如果未初始化）
       if (_albumCoverService == null) {
-        final apiService = ref.read(apiServiceProvider);
-        if (apiService == null) {
-          debugPrint('❌ [AutoCover] API服务未初始化，无法获取封面');
-          return;
-        }
-
         debugPrint('🔧 [AutoCover] 初始化 AlbumCoverService');
         final nativeSearch = ref.read(nativeMusicSearchServiceProvider);
         _albumCoverService = AlbumCoverService(
@@ -1839,10 +1990,7 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
       }
 
       // 获取登录地址（用于URL替换）
-      final apiService = ref.read(apiServiceProvider);
-      if (apiService == null) return;
       final loginBaseUrl = apiService.baseUrl;
-
       debugPrint('🖼️ [AutoCover] 登录地址: $loginBaseUrl');
 
       // 🚀 调用 AlbumCoverService 获取或刮削封面
@@ -1878,6 +2026,86 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         _searchingCoverForSong = null;
         debugPrint('🖼️ [AutoCover] 搜索完成，清除标记: $songName');
       }
+    }
+  }
+
+  /// 🖼️ 直接刮削在线封面（无服务器模式专用）
+  /// 从 "歌名 - 歌手" 格式解析，调用音乐平台搜索封面
+  Future<String?> _scrapeAlbumCoverDirectly(String songName) async {
+    try {
+      debugPrint('🔍 [AutoCover] 直接刮削模式启动: $songName');
+
+      // 解析歌曲名和歌手
+      String searchQuery = songName;
+      final parts = songName.split(' - ');
+      if (parts.length >= 2) {
+        final title = parts[0].trim();
+        final artist = parts[1].trim();
+        searchQuery = '$title $artist'; // QQ音乐搜索格式
+        debugPrint('🔍 [AutoCover] 解析歌曲信息: 歌名="$title", 歌手="$artist"');
+      }
+
+      final nativeSearch = ref.read(nativeMusicSearchServiceProvider);
+
+      // 🎯 策略1: 优先尝试 QQ 音乐（封面质量最佳）
+      debugPrint('🔍 [AutoCover] 尝试 QQ 音乐搜索...');
+      final qqResults = await nativeSearch.searchQQ(
+        query: searchQuery,
+        page: 1,
+      );
+
+      if (qqResults.isNotEmpty) {
+        final firstResult = qqResults.first;
+        if (firstResult.picture != null && firstResult.picture!.isNotEmpty) {
+          final coverUrl = firstResult.picture!;
+          if (_isValidCoverUrl(coverUrl)) {
+            debugPrint('✅ [AutoCover] QQ音乐封面: $coverUrl');
+            return coverUrl;
+          }
+        }
+      }
+
+      // 🎯 策略2: 回退到酷我音乐
+      debugPrint('🔍 [AutoCover] QQ音乐未找到，尝试酷我音乐...');
+      final kuwoResults = await nativeSearch.searchKuwo(
+        query: searchQuery,
+        page: 1,
+      );
+
+      if (kuwoResults.isNotEmpty) {
+        final firstResult = kuwoResults.first;
+        if (firstResult.picture != null && firstResult.picture!.isNotEmpty) {
+          final coverUrl = firstResult.picture!;
+          if (_isValidCoverUrl(coverUrl)) {
+            debugPrint('✅ [AutoCover] 酷我音乐封面: $coverUrl');
+            return coverUrl;
+          }
+        }
+      }
+
+      // 🎯 策略3: 最后尝试网易云音乐
+      debugPrint('🔍 [AutoCover] 酷我音乐未找到，尝试网易云音乐...');
+      final neteaseResults = await nativeSearch.searchNetease(
+        query: searchQuery,
+        page: 1,
+      );
+
+      if (neteaseResults.isNotEmpty) {
+        final firstResult = neteaseResults.first;
+        if (firstResult.picture != null && firstResult.picture!.isNotEmpty) {
+          final coverUrl = firstResult.picture!;
+          if (_isValidCoverUrl(coverUrl)) {
+            debugPrint('✅ [AutoCover] 网易云音乐封面: $coverUrl');
+            return coverUrl;
+          }
+        }
+      }
+
+      debugPrint('⚠️ [AutoCover] 所有音乐平台均未找到封面');
+      return null;
+    } catch (e) {
+      debugPrint('❌ [AutoCover] 直接刮削异常: $e');
+      return null;
     }
   }
 

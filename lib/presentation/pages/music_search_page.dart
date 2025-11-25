@@ -624,14 +624,7 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
 
       debugPrint('[DirectMode] ✅ 播放链接已准备: ${playUrl.substring(0, playUrl.length > 100 ? 100 : playUrl.length)}...');
 
-      // 4. 创建直连播放策略
-      final strategy = MiIoTDirectPlaybackStrategy(
-        miService: directState.miService,
-        deviceId: device.deviceId,
-        deviceName: device.name,
-      );
-
-      // 5. 显示播放提示
+      // 4. 显示播放提示
       if (mounted) {
         AppSnackBar.show(
           context,
@@ -643,15 +636,20 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
         );
       }
 
-      // 6. 执行播放
-      await strategy.playMusic(
+      // 5. 🎯 通过 PlaybackProvider 播放（正确的架构！）
+      // 这样可以：
+      // ✅ 使用已初始化的策略实例（带回调）
+      // ✅ 自动更新 UI 状态
+      // ✅ 自动搜索封面图
+      // ✅ 自动更新通知栏
+      await ref.read(playbackProvider.notifier).playMusic(
+        deviceId: device.deviceId,
         musicName: '${item.title} - ${item.author}',
         url: playUrl,
-        platform: item.platform ?? 'qq',
-        songId: item.songId ?? '',
+        albumCoverUrl: item.picture, // 🎨 传入封面图URL（搜索结果自带）
       );
 
-      debugPrint('[DirectMode] ✅ 播放请求已发送到小米设备');
+      debugPrint('[DirectMode] ✅ 播放请求已通过 PlaybackProvider 发送');
     } catch (e, stackTrace) {
       debugPrint('[DirectMode] ❌ 播放失败: $e');
       debugPrint('[DirectMode] 堆栈: ${stackTrace.toString().split('\n').take(5).join('\n')}');

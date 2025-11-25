@@ -42,10 +42,14 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
     required String deviceId,
     String? deviceName,
     AudioHandlerService? audioHandler,
+    Function()? onStatusChanged, // 🔧 在构造函数中接收回调，确保轮询启动前已设置
+    Future<String?> Function(String musicName)? onGetMusicUrl, // 🔧 在构造函数中接收回调
   })  : _miService = miService,
         _deviceId = deviceId,
         _deviceName = deviceName ?? '小爱音箱',
-        _audioHandler = audioHandler {
+        _audioHandler = audioHandler,
+        onStatusChanged = onStatusChanged, // 🔧 立即设置回调，避免 NULL 问题
+        onGetMusicUrl = onGetMusicUrl {    // 🔧 立即设置回调
     _initializeAudioHandler();
     _initializeHardwareInfo(); // 🎯 初始化硬件信息
     _startStatusPolling(); // 🔄 启动状态轮询
@@ -91,22 +95,57 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
         final isPlaying = status['status'] == 1;
         final detail = status['play_song_detail'] as Map<String, dynamic>?;
 
+        debugPrint('🔄 [MiIoTDirect] 轮询状态: status=$isPlaying, detail=$detail');
+
         if (detail != null) {
-          final title = detail['title'] as String? ?? _currentPlayingMusic?.curMusic ?? '';
-          final duration = detail['duration'] as int? ?? 0;
-          final position = detail['position'] as int? ?? 0;
+          final title = detail['title'] as String?;
+          final durationMs = detail['duration'] as int? ?? 0; // 毫秒
+          final positionMs = detail['position'] as int? ?? 0; // 毫秒
 
-          _currentPlayingMusic = PlayingMusic(
-            ret: 'OK',
-            curMusic: title,
-            curPlaylist: '直连播放',
-            isPlaying: isPlaying,
-            duration: duration,
-            offset: position,
-          );
+          // 🎯 将毫秒转换为秒（与 xiaomusic 模式保持一致）
+          final duration = (durationMs / 1000).round();
+          final position = (positionMs / 1000).round();
 
-          // 更新通知栏
-          _updateNotificationFromStatus();
+          // 🎯 智能更新：只有当新值有效时才更新，否则保留原值
+          // 注意：小米 IoT API 通常不返回 title，所以必须保留原来的歌曲名！
+          String finalTitle;
+          int finalDuration;
+
+          // 🎯 智能状态更新策略
+          // 关键原则：轮询只负责更新进度和播放状态，不修改歌曲名！
+          // 歌曲名只能由 playMusic() 设置（因为 API 不返回）
+          if (_currentPlayingMusic != null) {
+            // 已有播放信息，智能合并
+            // 🎯 优先使用 API 返回的 title（罕见），否则保留原歌曲名
+            finalTitle = (title != null && title.isNotEmpty)
+                ? title
+                : _currentPlayingMusic!.curMusic; // 🔧 保留原歌曲名（无论是否为空）
+
+            finalDuration = (duration > 0)
+                ? duration
+                : _currentPlayingMusic!.duration;
+
+            _currentPlayingMusic = PlayingMusic(
+              ret: 'OK',
+              curMusic: finalTitle,
+              curPlaylist: '直连播放',
+              isPlaying: isPlaying,
+              duration: finalDuration,
+              offset: position,
+            );
+
+            debugPrint('🔄 [MiIoTDirect] 更新状态: 歌曲=${finalTitle.isEmpty ? "(未播放)" : finalTitle}, 播放=$isPlaying, 进度=$position/$finalDuration 秒');
+
+            // 更新通知栏（只在有歌曲名时更新）
+            if (finalTitle.isNotEmpty) {
+              _updateNotificationFromStatus();
+            }
+          } else {
+            // 🎯 首次轮询且还没播放音乐
+            // 不创建对象，保持 null 状态，UI 会显示"暂无播放"
+            debugPrint('⏭️ [MiIoTDirect] 首次轮询，还没播放音乐，保持 null 状态');
+            // 🎯 不 return，继续执行到 onStatusChanged，让 UI 知道状态（即使是 null）
+          }
         } else if (_currentPlayingMusic != null) {
           // 没有详情时只更新播放状态
           _currentPlayingMusic = PlayingMusic(
@@ -117,6 +156,7 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
             duration: _currentPlayingMusic!.duration,
             offset: _currentPlayingMusic!.offset,
           );
+          debugPrint('🔄 [MiIoTDirect] 仅更新播放状态: $isPlaying');
         }
 
         // 通知状态变化
@@ -347,6 +387,7 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
           duration: 0, // 直连模式无法获取时长
           offset: 0,
         );
+        debugPrint('🔧 [MiIoTDirect] 已设置 _currentPlayingMusic: ${_currentPlayingMusic!.curMusic}');
 
         // 更新通知栏
         final parts = musicName.split(' - ');
@@ -365,7 +406,9 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
         }
 
         // 通知状态变化
+        debugPrint('🔔 [MiIoTDirect] 准备调用 onStatusChanged (${onStatusChanged != null ? "已设置" : "NULL"})');
         onStatusChanged?.call();
+        debugPrint('🔔 [MiIoTDirect] onStatusChanged 调用完成');
       } else {
         debugPrint('❌ [MiIoTDirect] 播放失败');
       }
@@ -388,13 +431,31 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
   Future<PlayingMusic?> getCurrentStatus() async {
     // 直连模式无法主动查询播放状态
     // 返回缓存的状态
+    debugPrint('🔍 [MiIoTDirect] getCurrentStatus 被调用，返回: ${_currentPlayingMusic?.curMusic ?? "null"}');
     return _currentPlayingMusic;
   }
 
   @override
   Future<int> getVolume() async {
-    // 直连模式暂不支持音量查询
-    return 50; // 返回默认值
+    // 🎯 尝试从设备获取真实音量
+    try {
+      final status = await _miService.getPlayStatus(_deviceId);
+      if (status != null) {
+        // 🔧 小米IoT API 返回的播放状态中可能包含音量信息
+        // 如果有 volume 字段，使用它；否则返回默认值
+        final volume = status['volume'] as int?;
+        if (volume != null) {
+          debugPrint('✅ [MiIoTDirect] 获取到设备音量: $volume');
+          return volume;
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ [MiIoTDirect] 获取音量失败: $e');
+    }
+
+    // 返回默认值
+    debugPrint('⚠️ [MiIoTDirect] 使用默认音量值: 50');
+    return 50;
   }
 
   @override
