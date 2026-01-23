@@ -69,6 +69,8 @@ dependencies:
   flutter_svg: ^2.0.10+1
   package_info_plus: ^8.0.0
   palette_generator: ^0.3.3+4
+  # 网络状态检测
+  connectivity_plus: ^6.0.5
 
 dev_dependencies:
   flutter_test:

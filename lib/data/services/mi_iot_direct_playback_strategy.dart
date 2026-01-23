@@ -602,6 +602,12 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
       return;
     }
 
+    // 🎯 关键修复：播放新歌时暂停状态轮询，避免竞态条件
+    // 问题：状态轮询定时器可能在播放流程中间触发，获取到旧歌状态并覆盖新歌信息
+    // 解决：暂停轮询 → 播放新歌 → 恢复轮询
+    debugPrint('⏸️ [MiIoTDirect] 暂停状态轮询，避免竞态条件');
+    _statusTimer?.cancel();
+
     try {
       // 🎯 调用增强的播放API，传入音乐名称和硬件信息
       final success = await _miService.playMusic(
@@ -670,6 +676,11 @@ class MiIoTDirectPlaybackStrategy implements PlaybackStrategy {
       }
     } catch (e) {
       debugPrint('❌ [MiIoTDirect] 播放异常: $e');
+    } finally {
+      // 🎯 关键修复：恢复状态轮询（无论成功还是失败）
+      // 确保轮询机制能继续工作，更新播放进度和状态
+      debugPrint('▶️ [MiIoTDirect] 恢复状态轮询');
+      _startStatusPolling();
     }
   }
 

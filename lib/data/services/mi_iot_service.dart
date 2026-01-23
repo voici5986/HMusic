@@ -6,6 +6,7 @@ import 'mi_hardware_detector.dart';
 import 'mi_audio_id_generator.dart';
 import 'mi_play_mode.dart';
 import 'audio_proxy_server.dart';
+import '../../core/utils/network_detector.dart';
 
 /// 小米IoT直连服务
 /// 不依赖xiaomusic服务端，直接调用小米云端API控制小爱音箱
@@ -376,14 +377,20 @@ class MiIoTService {
     // 通过本地代理服务器转发，可以完美解决这些问题
     // 🔧 优先使用本地代理（同局域网），其次公共代理，最后直接URL
 
-    // 方案1：尝试使用本地代理（需要同一局域网，用WiFi时可用）
-    if (_proxyServer != null && _proxyServer!.isRunning) {
+    // 🎯 智能代理选择：根据网络环境自动切换
+    // WiFi 环境：优先使用本地代理（速度快、稳定）
+    // 移动网络：直接使用公共代理（跳过本地代理检测，节省3秒超时）
+    final networkDetector = NetworkDetector();
+    final isWiFi = await networkDetector.isWiFiConnected();
+
+    // 方案1：尝试使用本地代理（仅在 WiFi 环境下）
+    if (isWiFi && _proxyServer != null && _proxyServer!.isRunning) {
       final originalUrl = playUrl;
       try {
         // 🔧 检查本地代理是否真的可达（关键修复！）
-        // 用流量时可能连不上本地代理，需要提前检测
+        // WiFi 环境下才检测本地代理，移动网络直接跳过
         final proxyUrl = _proxyServer!.getProxyUrl('http://www.baidu.com');
-        print('🔍 [MiIoT] 检查本地代理可达性: $proxyUrl');
+        print('🔍 [MiIoT] WiFi环境，检查本地代理可达性: $proxyUrl');
 
         final healthCheckResponse = await _dio.head(
           proxyUrl,
@@ -402,11 +409,13 @@ class MiIoTService {
           print('   原始URL: ${originalUrl.substring(0, originalUrl.length > 80 ? 80 : originalUrl.length)}...');
           print('   代理URL: ${playUrl.substring(0, playUrl.length > 80 ? 80 : playUrl.length)}...');
         } else {
-          print('⚠️ [MiIoT] 本地代理不可达（可能用流量了），跳过使用');
+          print('⚠️ [MiIoT] 本地代理不可达，跳过使用');
         }
       } catch (e) {
         print('⚠️ [MiIoT] 检查本地代理失败，跳过使用: $e');
       }
+    } else if (!isWiFi && _proxyServer != null && _proxyServer!.isRunning) {
+      print('📱 [MiIoT] 移动网络环境，跳过本地代理检测（节省3秒超时）');
     }
 
     // 方案2：本地代理不可用时，尝试公共代理
@@ -612,7 +621,7 @@ class MiIoTService {
               final status = await getPlayStatus(deviceId);
               if (status != null) {
                 final playStatus = status['status'];
-                final position = status['play_song_detail']?['position'];
+                final position = status['play_song_detail']?['position'] ?? 0;
                 print('📊 [MiIoT] 当前状态: status=$playStatus, position=$position');
 
                 // status=1 表示播放中，status=2 表示暂停
@@ -621,16 +630,26 @@ class MiIoTService {
                   print('🔄 [MiIoT] 尝试重新播放并增加等待时间...');
                   await resume(deviceId);
 
-                  // 🎯 增加等待时间到2秒（原来只有500ms太短了！）
-                  await Future.delayed(const Duration(seconds: 2));
+                  // 🎯 增加等待时间到3秒（给公共代理更多缓冲时间）
+                  await Future.delayed(const Duration(seconds: 3));
 
                   // 再次检查
                   final retryStatus = await getPlayStatus(deviceId);
                   if (retryStatus != null) {
                     final retryPlayStatus = retryStatus['status'];
-                    print('📊 [MiIoT] 重试后状态: status=$retryPlayStatus');
+                    final retryPosition = retryStatus['play_song_detail']?['position'] ?? 0;
+                    print('📊 [MiIoT] 重试后状态: status=$retryPlayStatus, position=$retryPosition');
+
+                    // 🎯 关键优化：检查 position 是否在增加
+                    // 即使 status=2，如果 position 在增加说明音箱正在播放！
+                    final isPositionIncreasing = retryPosition > position;
+
                     if (retryPlayStatus == 1) {
                       print('✅ [MiIoT] 重试成功，音箱已开始播放');
+                      return true;
+                    } else if (isPositionIncreasing) {
+                      print('✅ [MiIoT] 检测到播放进度在增加，音箱正在播放中（即使状态显示暂停）');
+                      print('💡 [MiIoT] position从 $position 增加到 $retryPosition，判定为播放成功');
                       return true;
                     } else if (useProxy) {
                       // 🔄 如果使用了代理但仍然失败，尝试使用直接URL
