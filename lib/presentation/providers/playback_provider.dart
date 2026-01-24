@@ -372,8 +372,36 @@ class PlaybackNotifier extends StateNotifier<PlaybackState> {
         _currentDeviceId = null; // 重置设备ID，准备切换策略
         _currentStrategy?.dispose();
         _currentStrategy = null;
+
+        // 🎯 关键修复：根据新模式重新初始化策略
+        _reinitializeForNewMode(next);
       }
     });
+  }
+
+  /// 🎯 模式切换后重新初始化策略
+  Future<void> _reinitializeForNewMode(PlaybackMode newMode) async {
+    debugPrint('🎵 [PlaybackProvider] 为新模式重新初始化策略: $newMode');
+
+    if (newMode == PlaybackMode.miIoTDirect) {
+      // 直连模式：检查是否已登录，然后初始化策略
+      final directState = ref.read(directModeProvider);
+      if (directState is DirectModeAuthenticated) {
+        debugPrint('🎵 [PlaybackProvider] 直连模式已登录，初始化直连策略');
+        await _switchToDirectModeStrategy(directState);
+      } else {
+        debugPrint('⚠️ [PlaybackProvider] 直连模式未登录，等待登录后初始化');
+      }
+    } else {
+      // xiaomusic 模式：检查设备，然后初始化策略
+      final deviceState = ref.read(deviceProvider);
+      if (deviceState.selectedDeviceId != null) {
+        debugPrint('🎵 [PlaybackProvider] xiaomusic 模式有设备，初始化远程策略');
+        await _switchStrategy(deviceState.selectedDeviceId!, deviceState.devices);
+      } else {
+        debugPrint('⚠️ [PlaybackProvider] xiaomusic 模式无设备，等待选择设备后初始化');
+      }
+    }
   }
 
   // 🎯 切换到直连模式播放策略
