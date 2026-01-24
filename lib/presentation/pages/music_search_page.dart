@@ -625,6 +625,76 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
     }
   }
 
+  /// 🎯 显示创建歌单对话框（返回歌单名称，取消返回 null）
+  Future<String?> _showCreatePlaylistDialog() async {
+    final controller = TextEditingController();
+
+    return showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            '新建歌单',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: '输入歌单名称',
+              hintStyle: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: Theme.of(context).colorScheme.primary,
+                  width: 2,
+                ),
+              ),
+            ),
+            onSubmitted: (value) {
+              if (value.trim().isNotEmpty) {
+                Navigator.pop(context, value.trim());
+              }
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: Text(
+                '取消',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                final name = controller.text.trim();
+                if (name.isNotEmpty) {
+                  Navigator.pop(context, name);
+                }
+              },
+              child: const Text('创建'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   /// 📋 添加到歌单（支持两种模式）
   Future<void> _addToPlaylist(OnlineMusicResult item) async {
     try {
@@ -638,50 +708,50 @@ class _MusicSearchPageState extends ConsumerState<MusicSearchPage> {
           : ref.read(playlistProvider).playlists;
 
       if (playlists.isEmpty) {
-        // 没有歌单，提示用户先创建
+        // 没有歌单，直接在这里创建并添加歌曲
         if (mounted) {
-          final shouldCreate = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              backgroundColor: Theme.of(context).colorScheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              title: Text(
-                '还没有歌单',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              content: Text(
-                '请先创建一个歌单',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.8),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: Text(
-                    '取消',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: const Text('去创建'),
-                ),
-              ],
-            ),
-          );
+          final newPlaylistName = await _showCreatePlaylistDialog();
 
-          if (shouldCreate == true) {
-            // 跳转到歌单页面并自动弹出创建对话框
-            context.push('/playlist?showCreate=true');
+          if (newPlaylistName != null && newPlaylistName.isNotEmpty) {
+            // 🎯 创建歌单成功，直接添加歌曲
+            debugPrint('📋 [MusicSearch] 创建歌单并添加: $newPlaylistName');
+
+            if (isDirectMode) {
+              // 直连模式：创建歌单
+              await ref.read(localPlaylistProvider.notifier).createPlaylist(newPlaylistName);
+
+              // 添加歌曲
+              final song = LocalPlaylistSong.fromOnlineMusic(
+                title: item.title,
+                artist: item.author,
+                platform: item.platform ?? 'unknown',
+                songId: item.songId ?? '',
+                coverUrl: item.picture,
+              );
+
+              await ref.read(localPlaylistProvider.notifier).addMusicToPlaylist(
+                playlistName: newPlaylistName,
+                songs: [song],
+              );
+            } else {
+              // xiaomusic 模式：创建歌单
+              await ref.read(playlistProvider.notifier).createPlaylist(newPlaylistName);
+
+              // 添加歌曲
+              final musicName = '${item.title} - ${item.author}';
+              await ref.read(playlistProvider.notifier).addMusicToPlaylist(
+                musicNames: [musicName],
+                playlistName: newPlaylistName,
+              );
+            }
+
+            // 显示成功提示
+            if (mounted) {
+              AppSnackBar.showSuccess(
+                context,
+                '✅ 已创建歌单 "$newPlaylistName" 并添加歌曲',
+              );
+            }
           }
         }
         return;
