@@ -48,6 +48,12 @@
 
 ---
 
+## 🙏 致谢
+
+感谢 [xiaomusic](https://github.com/hanxi/xiaomusic) 项目及其开发者 [@hanxi](https://github.com/hanxi)，HMusic 的 xiaomusic 模式基于该项目实现，直连模式的小米 IoT API 也参考了相关实现。
+
+---
+
 ## ☕ 请作者喝杯咖啡
 
 如果 HMusic 对你有帮助，欢迎请作者喝杯咖啡～ 你的支持是我持续开发的动力！
