@@ -262,6 +262,24 @@ HMusic 现在支持两种播放模式，满足不同用户的需求：
 
 ---
 
+## ☕ 请作者喝杯咖啡
+
+如果 HMusic 对你有帮助，欢迎请作者喝杯咖啡～ 你的支持是我持续开发的动力！
+
+<p align="center">
+  <img src="docs/donate/wechat.jpg" alt="微信赞赏码" width="300" />
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/donate/alipay.jpg" alt="支付宝收款码" width="300" />
+</p>
+
+<p align="center">
+  <b>微信赞赏</b>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <b>支付宝</b>
+</p>
+
+---
+
 ## 📜 许可证
 
 本项目采用 **GNU Affero General Public License v3.0 (AGPL-3.0)** 许可证开源。
