@@ -1,13 +1,12 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/playback_provider.dart';
 import '../providers/lyric_provider.dart';
-import '../providers/device_provider.dart';
-import '../../data/models/device.dart';
 
-/// 歌词页面
+/// 歌词页面 - 支持沉浸模式（顶部/底部控制栏自动隐藏）
 class LyricsPage extends ConsumerStatefulWidget {
   const LyricsPage({super.key});
 
@@ -18,14 +17,80 @@ class LyricsPage extends ConsumerStatefulWidget {
 class _LyricsPageState extends ConsumerState<LyricsPage> {
   final ScrollController _scrollController = ScrollController();
   int _lastCurrentLine = -1;
-  String? _lastSongName; // 🔧 记录上一次的歌曲名，用于检测歌曲切换
-  double? _draggingProgress; // 🔧 拖动进度条时的临时进度值（0.0-1.0）
+  String? _lastSongName;
+  double? _draggingProgress;
+
+  // 🎭 沉浸模式状态
+  bool _showControls = true;
+  Timer? _autoHideTimer;
+
+  /// 自动隐藏延时（秒）
+  static const _autoHideDuration = Duration(seconds: 5);
+
+  /// 控制栏动画时长
+  static const _animationDuration = Duration(milliseconds: 300);
+
+  @override
+  void initState() {
+    super.initState();
+    // 页面打开后 5 秒自动进入沉浸模式
+    _startAutoHideTimer();
+  }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _autoHideTimer?.cancel();
     super.dispose();
   }
+
+  // ---------------------------------------------------------------------------
+  // 沉浸模式控制
+  // ---------------------------------------------------------------------------
+
+  /// 切换控制栏显示/隐藏
+  void _toggleControls() {
+    setState(() {
+      _showControls = !_showControls;
+    });
+    if (_showControls) {
+      _startAutoHideTimer();
+    } else {
+      _autoHideTimer?.cancel();
+    }
+  }
+
+  /// 显示控制栏并启动自动隐藏计时器
+  void _showControlsAndStartTimer() {
+    if (_showControls) return;
+    setState(() {
+      _showControls = true;
+    });
+    _startAutoHideTimer();
+  }
+
+  /// 启动 / 重置 5 秒自动隐藏计时器
+  void _startAutoHideTimer() {
+    _autoHideTimer?.cancel();
+    _autoHideTimer = Timer(_autoHideDuration, () {
+      if (mounted && _showControls) {
+        setState(() {
+          _showControls = false;
+        });
+      }
+    });
+  }
+
+  /// 任何用户交互都应调用此方法，重置自动隐藏计时器
+  void _resetAutoHideTimer() {
+    if (_showControls) {
+      _startAutoHideTimer();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -39,10 +104,9 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     if (currentSongName.isNotEmpty && currentSongName != _lastSongName) {
       debugPrint('🎤 [LyricsPage] 检测到歌曲切换: $_lastSongName -> $currentSongName');
       _lastSongName = currentSongName;
-      _lastCurrentLine = -1; // 重置当前行索引
-      _draggingProgress = null; // 重置拖动状态
+      _lastCurrentLine = -1;
+      _draggingProgress = null;
 
-      // 延迟加载歌词，避免在 build 中调用
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           debugPrint('🎤 [LyricsPage] 自动重新加载歌词');
@@ -51,22 +115,21 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
       });
     }
 
-    // 🔧 计算当前应该显示的时间（拖动中显示预览时间，否则使用服务器的进度）
+    // 🔧 计算当前显示时间
     final displayTime = _draggingProgress != null
         ? (_draggingProgress! * (current?.duration ?? 0)).round()
         : (current?.offset ?? 0);
 
-    // 获取当前歌词行（基于显示时间）
+    // 获取当前歌词行
     final currentLineIndex = current != null
         ? ref.read(lyricProvider.notifier).getCurrentLineIndex(displayTime)
         : -1;
 
-    // 🔧 改进的滚动逻辑：拖动时立即滚动，播放时平滑滚动
+    // 🔧 滚动逻辑
     if (currentLineIndex >= 0 && currentLineIndex != _lastCurrentLine) {
       _lastCurrentLine = currentLineIndex;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          // 拖动时使用 jumpTo 立即定位，播放时使用 animateTo 平滑滚动
           if (_draggingProgress != null) {
             _scrollToLineInstant(currentLineIndex);
           } else {
@@ -76,60 +139,93 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
       });
     }
 
+    // =====================================================================
+    // 使用 Stack 布局：歌词全屏 + 控制栏覆盖在上下方
+    // =====================================================================
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 背景层:封面模糊图
+          // ── Layer 0: 背景模糊图 ──
           if (coverUrl != null && coverUrl.isNotEmpty)
             Positioned.fill(
               child: _buildBlurredBackground(coverUrl),
             ),
 
-          // 主内容
-          SafeArea(
-            child: Column(
-              children: [
-                // 顶部信息栏
-                _buildTopBar(current),
-
-                // 歌词区域
-                Expanded(
-                  child: lyricState.isLoading
-                      ? _buildLoading()
-                      : (lyricState.lyric == null ||
-                              !lyricState.lyric!.hasLyrics)
-                          ? _buildNoLyrics()
-                          : _buildLyricsContent(lyricState, currentLineIndex, displayTime),
-                ),
-
-                // 底部控制栏
-                _buildBottomControls(current),
-              ],
+          // ── Layer 1: 歌词区域（全屏） ──
+          Positioned.fill(
+            child: SafeArea(
+              child: GestureDetector(
+                // 点击空白区域（ListView 的 padding）切换控制栏
+                onTap: _toggleControls,
+                behavior: HitTestBehavior.opaque,
+                child: lyricState.isLoading
+                    ? _buildLoading()
+                    : (lyricState.lyric == null || !lyricState.lyric!.hasLyrics)
+                        ? _buildNoLyrics()
+                        : _buildLyricsContent(
+                            lyricState, currentLineIndex, displayTime),
+              ),
             ),
           ),
 
-          // 🔧 调试用：屏幕中央参考线（可选，调试完成后可以注释掉）
-          if (false) // 设置为 true 可以显示参考线
-            Positioned(
-              top: MediaQuery.of(context).size.height / 2 - 1,
-              left: 0,
-              right: 0,
-              child: Container(
-                height: 2,
-                color: Colors.red.withOpacity(0.5),
+          // ── Layer 2: 顶部信息栏（动画覆盖层） ──
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: IgnorePointer(
+                ignoring: !_showControls,
+                child: AnimatedSlide(
+                  offset: Offset(0, _showControls ? 0 : -1),
+                  duration: _animationDuration,
+                  curve: Curves.easeInOut,
+                  child: AnimatedOpacity(
+                    opacity: _showControls ? 1.0 : 0.0,
+                    duration: _animationDuration,
+                    child: _buildTopBar(current),
+                  ),
+                ),
               ),
             ),
+          ),
+
+          // ── Layer 3: 底部控制栏（动画覆盖层） ──
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              top: false,
+              child: IgnorePointer(
+                ignoring: !_showControls,
+                child: AnimatedSlide(
+                  offset: Offset(0, _showControls ? 0 : 1),
+                  duration: _animationDuration,
+                  curve: Curves.easeInOut,
+                  child: AnimatedOpacity(
+                    opacity: _showControls ? 1.0 : 0.0,
+                    duration: _animationDuration,
+                    child: _buildBottomControls(current),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  /// 构建模糊背景
+  // ---------------------------------------------------------------------------
+  // 背景
+  // ---------------------------------------------------------------------------
+
   Widget _buildBlurredBackground(String coverUrl) {
     return Stack(
       children: [
-        // 封面图放大并模糊
         Positioned.fill(
           child: CachedNetworkImage(
             imageUrl: coverUrl,
@@ -155,8 +251,6 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
             ),
           ),
         ),
-
-        // 渐变遮罩
         Positioned.fill(
           child: Container(
             decoration: BoxDecoration(
@@ -176,80 +270,91 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     );
   }
 
-  /// 构建顶部信息栏
+  // ---------------------------------------------------------------------------
+  // 顶部信息栏
+  // ---------------------------------------------------------------------------
+
   Widget _buildTopBar(dynamic currentMusic) {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-          width: 1,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.15),
+                width: 1,
+              ),
+            ),
+            child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      currentMusic?.curMusic ?? '暂无播放',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      currentMusic?.curPlaylist ?? '',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.8),
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // 关闭按钮
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  currentMusic?.curMusic ?? '暂无播放',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  currentMusic?.curPlaylist ?? '',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.8),
-                    fontSize: 14,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          // 关闭按钮
-          IconButton(
-            onPressed: () => Navigator.of(context).pop(),
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.close_rounded,
-                color: Colors.white,
-                size: 20,
-              ),
-            ),
-          ),
-        ],
-      ),
+    ),
     );
   }
 
-  /// 构建加载状态
+  // ---------------------------------------------------------------------------
+  // 歌词内容
+  // ---------------------------------------------------------------------------
+
   Widget _buildLoading() {
     return const Center(
-      child: CircularProgressIndicator(
-        color: Colors.white,
-      ),
+      child: CircularProgressIndicator(color: Colors.white),
     );
   }
 
-  /// 构建无歌词状态
   Widget _buildNoLyrics() {
     return Center(
       child: Column(
@@ -296,34 +401,40 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     );
   }
 
-  /// 构建歌词内容
-  Widget _buildLyricsContent(dynamic lyricState, int currentLineIndex, int displayTime) {
+  Widget _buildLyricsContent(
+      dynamic lyricState, int currentLineIndex, int displayTime) {
     final lyric = lyricState.lyric!;
     final screenHeight = MediaQuery.of(context).size.height;
     final safeAreaTop = MediaQuery.of(context).padding.top;
+    final safeAreaBottom = MediaQuery.of(context).padding.bottom;
 
-    // 🔧 计算实际可用的歌词显示区域高度
-    // 顶部栏高度：padding(16*2) + 内容高度约 60 = ~92
-    // 底部控制栏高度：约 130（包括 margin）
+    // 🔧 沉浸模式下控制栏高度为 0（全屏歌词）
     const topBarHeight = 92.0;
     const bottomControlHeight = 130.0;
+    final effectiveTopBar = _showControls ? topBarHeight : 0.0;
+    final effectiveBottomBar = _showControls ? bottomControlHeight : 0.0;
 
-    // 实际歌词区域高度
-    final lyricsAreaHeight = screenHeight - safeAreaTop - topBarHeight - bottomControlHeight;
+    final lyricsAreaHeight = screenHeight -
+        safeAreaTop -
+        safeAreaBottom -
+        effectiveTopBar -
+        effectiveBottomBar;
 
-    // 🔧 当前行显示位置：区域高度的 40%（向上移动）
-    const itemHeight = 90.0; // 与歌词行固定高度保持一致
-    final topPadding = lyricsAreaHeight * 0.4 - (itemHeight / 2); // 40% 位置，居中歌词行
-    final bottomPadding = lyricsAreaHeight * 0.6 - (itemHeight / 2);
+    const itemHeight = 90.0;
+    final topPadding = (lyricsAreaHeight * 0.4 - (itemHeight / 2))
+        .clamp(0.0, double.infinity);
+    final bottomPadding = (lyricsAreaHeight * 0.6 - (itemHeight / 2))
+        .clamp(0.0, double.infinity);
 
-    debugPrint('🎯 [Layout] 屏幕高度=$screenHeight, SafeArea顶部=$safeAreaTop');
-    debugPrint('🎯 [Layout] 歌词区域高度=$lyricsAreaHeight, topPadding=$topPadding, bottomPadding=$bottomPadding');
+    // 🔧 沉浸模式下为控制栏预留空间（防止歌词被遮挡）
+    final extraTopPadding = _showControls ? topBarHeight : 0.0;
+    final extraBottomPadding = _showControls ? bottomControlHeight : 0.0;
 
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.only(
-        top: topPadding,
-        bottom: bottomPadding,
+        top: topPadding + extraTopPadding,
+        bottom: bottomPadding + extraBottomPadding,
       ),
       itemCount: lyric.lines.length,
       itemBuilder: (context, index) {
@@ -332,10 +443,16 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
 
         return GestureDetector(
           onTap: () {
-            // 🎵 点击歌词行跳转播放（仅本地播放模式支持）
+            if (!_showControls) {
+              // 沉浸模式下点击 → 显示控制栏
+              _showControlsAndStartTimer();
+              return;
+            }
+            // 控制栏可见时，本地模式支持点击歌词跳转
             final playbackState = ref.read(playbackProvider);
             if (playbackState.isLocalMode) {
               ref.read(playbackProvider.notifier).seekTo(line.timestamp);
+              _resetAutoHideTimer();
             }
           },
           child: _buildLyricLine(line.text, isCurrent),
@@ -344,7 +461,10 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     );
   }
 
-  /// 构建单行歌词（固定样式，通过位置判断大小）
+  // ---------------------------------------------------------------------------
+  // 单行歌词
+  // ---------------------------------------------------------------------------
+
   Widget _buildLyricLine(String text, bool isCurrent) {
     final displayText = text.isEmpty ? '♪' : text;
     final themeColor = Theme.of(context).colorScheme.primary;
@@ -363,8 +483,8 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
                   displayText,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: isCurrent ? themeColor : Colors.white, // 🎨 当前行=青色，其他行=白色
-                    fontSize: isCurrent ? 26 : 16, // 🎨 当前行字体更大
+                    color: isCurrent ? themeColor : Colors.white,
+                    fontSize: isCurrent ? 26 : 16,
                     fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w400,
                     height: 1.5,
                   ),
@@ -394,7 +514,6 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     );
   }
 
-  /// 构建小圆点指示器
   Widget _buildDot(bool active) {
     return Container(
       width: 6,
@@ -406,15 +525,18 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     );
   }
 
-  /// 构建底部控制栏
+  // ---------------------------------------------------------------------------
+  // 底部控制栏
+  // ---------------------------------------------------------------------------
+
   Widget _buildBottomControls(dynamic currentMusic) {
     final isPlaying = currentMusic?.isPlaying ?? false;
 
     // 🎵 只有本地播放模式才允许拖动进度条
     final playbackState = ref.watch(playbackProvider);
-    final canSeek = playbackState.isLocalMode && (currentMusic?.duration ?? 0) > 0;
+    final canSeek =
+        playbackState.isLocalMode && (currentMusic?.duration ?? 0) > 0;
 
-    // 🔧 计算显示的进度（拖动中显示预览值，否则显示实际值）
     final displayProgress = _draggingProgress ??
         ((currentMusic?.duration ?? 0) > 0
             ? ((currentMusic?.offset ?? 0) / (currentMusic?.duration ?? 1))
@@ -425,19 +547,24 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
         ? (_draggingProgress! * (currentMusic?.duration ?? 0)).round()
         : (currentMusic?.offset ?? 0);
 
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.15),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
         children: [
           // 进度条
           Row(
@@ -454,36 +581,34 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
                 child: SliderTheme(
                   data: SliderThemeData(
                     trackHeight: 3,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 6,
-                    ),
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 14,
-                    ),
+                    thumbShape:
+                        const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape:
+                        const RoundSliderOverlayShape(overlayRadius: 14),
                   ),
                   child: Slider(
                     value: displayProgress,
                     onChanged: canSeek
                         ? (v) {
-                            // 🔧 拖动时只更新预览，不执行 seek
                             setState(() {
                               _draggingProgress = v;
                             });
+                            _resetAutoHideTimer(); // 拖动进度条时重置计时器
                           }
-                        : null, // 🎵 远程播放模式禁用拖动
+                        : null,
                     onChangeEnd: canSeek
                         ? (v) {
-                            // 🔧 拖动结束时才执行 seek
                             final seekSeconds =
                                 (v * (currentMusic!.duration)).round();
                             setState(() {
-                              _draggingProgress = null; // 清除拖动状态
+                              _draggingProgress = null;
                             });
                             ref
                                 .read(playbackProvider.notifier)
                                 .seekTo(seekSeconds);
+                            _resetAutoHideTimer();
                           }
-                        : null, // 🎵 远程播放模式禁用拖动
+                        : null,
                     activeColor: Colors.white.withOpacity(0.85),
                     inactiveColor: Colors.white.withOpacity(0.25),
                   ),
@@ -504,13 +629,14 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 上一曲
               _buildControlButton(
                 icon: Icons.skip_previous_rounded,
-                onPressed: () => ref.read(playbackProvider.notifier).previous(),
+                onPressed: () {
+                  ref.read(playbackProvider.notifier).previous();
+                  _resetAutoHideTimer();
+                },
               ),
               const SizedBox(width: 24),
-              // 播放/暂停
               _buildControlButton(
                 icon: isPlaying
                     ? Icons.pause_rounded
@@ -521,23 +647,28 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
                   } else {
                     ref.read(playbackProvider.notifier).resumeMusic();
                   }
+                  _resetAutoHideTimer();
                 },
                 isPrimary: true,
               ),
               const SizedBox(width: 24),
-              // 下一曲
               _buildControlButton(
                 icon: Icons.skip_next_rounded,
-                onPressed: () => ref.read(playbackProvider.notifier).next(),
+                onPressed: () {
+                  ref.read(playbackProvider.notifier).next();
+                  _resetAutoHideTimer();
+                },
               ),
             ],
           ),
-        ],
+          ],
+        ),
       ),
+    ),
+    ),
     );
   }
 
-  /// 构建控制按钮
   Widget _buildControlButton({
     required IconData icon,
     required VoidCallback onPressed,
@@ -554,14 +685,19 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
         onPressed: onPressed,
         icon: Icon(
           icon,
-          color: isPrimary ? Theme.of(context).colorScheme.primary : Colors.white,
+          color: isPrimary
+              ? Theme.of(context).colorScheme.primary
+              : Colors.white,
           size: isPrimary ? 32 : 28,
         ),
       ),
     );
   }
 
-  /// 格式化时间
+  // ---------------------------------------------------------------------------
+  // 工具方法
+  // ---------------------------------------------------------------------------
+
   String _fmt(int seconds) {
     if (seconds <= 0) return '0:00';
     final d = Duration(seconds: seconds);
@@ -570,18 +706,11 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     return '$m:$s';
   }
 
-  /// 滚动到指定行（平滑动画）
   void _scrollToLine(int lineIndex) {
     if (!_scrollController.hasClients) return;
 
-    // 🔧 计算目标位置：让指定行精确地显示在屏幕中央
-    const itemHeight = 90.0; // 固定的每行高度
-
-    // 目标偏移 = 行索引 * 行高
-    // 因为 top padding = screenHeight / 2，所以第 0 行滚动到 offset=0 时就在屏幕中央
+    const itemHeight = 90.0;
     final targetOffset = lineIndex * itemHeight;
-
-    debugPrint('🎯 [Scroll] 平滑滚动到第 $lineIndex 行, offset=$targetOffset');
 
     _scrollController.animateTo(
       targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
@@ -590,17 +719,11 @@ class _LyricsPageState extends ConsumerState<LyricsPage> {
     );
   }
 
-  /// 滚动到指定行（立即跳转，用于拖动进度条）
   void _scrollToLineInstant(int lineIndex) {
     if (!_scrollController.hasClients) return;
 
-    // 🔧 计算目标位置：让指定行精确地显示在屏幕中央
-    const itemHeight = 90.0; // 固定的每行高度
-
-    // 目标偏移 = 行索引 * 行高
+    const itemHeight = 90.0;
     final targetOffset = lineIndex * itemHeight;
-
-    debugPrint('🎯 [Scroll] 立即跳转到第 $lineIndex 行, offset=$targetOffset');
 
     _scrollController.jumpTo(
       targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
